@@ -70,6 +70,7 @@ class Linear:
         return LRR[0]*x+LRR[1]
     def getC(self,x,xl,yl):
         peaks= find_peaks(self.data['Intensity'], prominence=[prominence],width=width,height=height) #find peaks
+        IPeaks=Iv.index(max(Iv))
         XPP=[xl]  #use origin of previous spiral as a point
         YPP=[yl]
         XPP.append(self.data['X'][peaks[0][0]])
@@ -164,7 +165,9 @@ def SafeLM(joints,Final_Pose):
         
 def SafeJM(joints,Final_Pose):
     if robot.MoveJ_Test(joints,Final_Pose) == 0:         # linear move to the approach position
+        print('moved')    
         robot.MoveJ(Final_Pose)
+        print('moved')
     else :
         print("collision avoided")
         
@@ -181,7 +184,7 @@ def SafeJM(joints,Final_Pose):
 xl=0 #starting offset from target for spiral
 yl=0
 zl=0
-Loops=3 #number of loops to run SSAP
+Loops=2 #number of loops to run SSAP
 
 
 # Set up the IP address and port number of the robot
@@ -196,24 +199,28 @@ robots={ 'Names':R_NAMES,'Tools':RTOOLS,'IP': IPs,'Port': PORT}
 rdf = pd.DataFrame(robots)
 
 
-for nrobot in range(0,len(rdf)-1):
+for nrobot in range(0,len(rdf)):
+    print(rdf['Names'][nrobot])
+    
     robot=RDK.Item(rdf['Names'][nrobot])
     IP=rdf['IP'][nrobot]
-    Port=rdf['Port'][nrobot]
-    robot.Connect(IP)
-    print(robot)
+    robot.ConnectSafe(IP)
+    
+    Home='Home'+str(nrobot+1)
+    Home=RDK.Item(Home)
+    
     #robot.setConnectionParams(IP, Port, 'socket')
     tool=RDK.Item(rdf['Tools'][nrobot])
     robot.setPoseTool(tool) # Update the TCP
-    robot.setSpeed(100)  # Set linear speed in mm/s
-    robot.setJoints([0,0,0,0,0,0])      # set all robot axes to zero
+    robot.setSpeed(-1,25)  # Set linear speed in mm/s
+    robot.setSpeed(25)  # Set linear speed in mm/s
     
+    rj=robot.Joints()
+    Final = Home.Pose()
+    SafeJM(rj,Final)
 
-    # Connect to the robot
-
-print('Robots homed')
-
-
+print('Robots homed')  
+#%%
 
 PR= RDK.Item('Photo Resistor',ITEM_TYPE_TARGET)
 X,Y,Z,A,B,C=Pose_2_KUKA(PR.Pose())
@@ -231,6 +238,10 @@ ESP.get("goalposLED")
 
 for nrobot in range(0,len(rdf)):
     print(nrobot)
+    xl=0 #starting offset from target for spiral
+    yl=0
+    zl=0
+    
     robot=RDK.Item(rdf['Names'][nrobot])
 
     TPP='TPP'+str(nrobot+1)
@@ -257,17 +268,17 @@ for nrobot in range(0,len(rdf)):
         if __name__=="__main__":
             print('Starting Spiral '+str(L))
     
-            cur_spiral=Spiral(xl,yl,400) #setting params of the spiral we will be using
+            cur_spiral=Spiral(xl,yl,200) #setting params of the spiral we will be using
             revs=20/L**L
             points=200
-            x,y=cur_spiral.build(20/L**2,2/L**2) #build our spiral x y coords
+            x,y=cur_spiral.build(20/L**2,3/L**2) #build our spiral x y coords
             step=.05/L #linear step size
             zstep=2/L
     
             Ix=-10
             Iy=10
             TestInt=Intensity(Ix,Iy,0,0,10,10) #set test intensity parameters     
-            prominence=10
+            prominence=5
             width=1
             height=10
             plateau_size=2 ############################################
@@ -282,7 +293,7 @@ for nrobot in range(0,len(rdf)):
         Iv=[]
         Cv=[]
     
-        for i in range(1,len(x)): #loop to get coord and corresponding intensity
+        for i in range(0,len(x)): #loop to get coord and corresponding intensity
             if len(find_peaks(Iv,prominence=[prominence],width=width,height=height)[0])<=0: #check if we found a peak
                 if i==len(x):
                     print('No peaks found in spiral: Spiral centered')
@@ -302,17 +313,19 @@ for nrobot in range(0,len(rdf)):
                 Y.append(y[i])
                 Z.append(0)
                 #Ic=PR.get() #get intensity for PR for online run
-                Ic=ESP.get("PRInt")
-                #Ic=TestInt.get(x[i],y[i]) #test intensity get
-                Iv.append(np.array(Ic))
+
     
                 #robot.MoveL(target.Pose()*transl(coord))
                 
                 rj=robot.Joints()
                 Final = target.Pose()*transl(coord)
                 SafeLM(rj,Final)
-                
+                print(Final)
                 robot.WaitFinished()
+                
+                Ic=ESP.get("PRInt")
+                #Ic=TestInt.get(x[i],y[i]) #test intensity get
+                Iv.append(np.array(Ic))
             else:
                 ps=find_peaks(Iv,prominence=[prominence],width=width,height=height)[0][0]
                 fig1 = plt.figure()
@@ -347,7 +360,7 @@ for nrobot in range(0,len(rdf)):
         data = pd.DataFrame(titled_columns)
         print('Spiral ' +str(L)+ ' Completed')
     
-        if len(find_peaks(data['Intensity'],plateau_size=plateau_size,height=height)[0])>0: #check to see if we are at the peak
+        if len(find_peaks(data['Intensity'],plateau_size=plateau_size,height=200)[0])>0: #check to see if we are at the peak
             PI=find_peaks(data['Intensity'],plateau_size=plateau_size,height=height)[0]
             xl=data['X'][PI]
             yl=data['Y'][PI]
@@ -370,17 +383,26 @@ for nrobot in range(0,len(rdf)):
     
         peaks= find_peaks(data['Intensity'],height=height,prominence=[prominence],width=width) 
         IPeaks=peaks[0][0]
-        IPeaks=Iv.index(max(Iv))
+        #IPeaks=Iv.index(max(Iv))
     
         xL=data['X'][IPeaks]
         yL=CL.getC(xL,xl,yl) #start y
-    
+        
+        print(data['X'][IPeaks],data['Y'][IPeaks])
+        print(xL,yL)
         Xl=[xL]  
         Yl=[yL]
     
         PRS=data['Intensity'][IPeaks]
         Il=[PRS]
-    
+        
+        coord=(xL,yL,zl)
+        rj=robot.Joints()
+        Final = target.Pose()*transl(coord)
+        SafeLM(rj,Final)
+        print(Final)
+        print('at max of spiral')
+        
         if  data['X'][IPeaks] > xl:  #find direction to move
             step=step
         else:
@@ -407,7 +429,6 @@ for nrobot in range(0,len(rdf)):
             Il.append(LI)
             coord=(xL,yL,zl)
             
-            #robot.MoveL(target.Pose()*transl(coord))
             rj=robot.Joints()
             Final = target.Pose()*transl(coord)
             SafeLM(rj,Final)
@@ -455,7 +476,7 @@ for nrobot in range(0,len(rdf)):
         #Push Pull Search
         IPP=[]
         ZLPP=[]
-        
+        print('Push pull test: Start')
         for i in range(3):
             coord=(xl,yl,zl)
             ZLPP.append(zl)
@@ -474,7 +495,7 @@ for nrobot in range(0,len(rdf)):
             IPP.append(PPI)
     
             zl=zl+(zstep)
-    
+        print('Push pull test: Complete')
         plt.plot(ZLPP,IPP)
         plt.show()
     
@@ -482,49 +503,54 @@ for nrobot in range(0,len(rdf)):
             zstep=zstep
         else:
             zstep=-zstep
-        ZLPP=[]
-        IPP=[]
     
         coord=(xl,yl,zl)
         #robot.MoveJ(target.Pose()*transl(coord))
         
         rj=robot.Joints()
         Final = target.Pose()*transl(coord)
-        SafeJM(rj,Final)        
-        #maybe savitzky golay or moving average filter
-        while len(find_peaks(IPP,prominence=5,height=height)[0])<=0 or PPI <= .9*max(IPP): #Push pull
-            coord=(xl,yl,zl)
-            ZLPP.append(zl)
-            #robot.MoveL(target.Pose()*transl(coord))
-            rj=robot.Joints()
-            Final = target.Pose()*transl(coord)
-            SafeLM(rj,Final)
-            
-            PRPPT=[]
-            for j in range(IAS):
-                #PRPP=PR.get()
-                PRPP=ESP.get("PRInt")
-                PRPPT.append(PRPP)
-            PPI=np.average(PRPPT)
-            IPP.append(PPI)
-            zl=zl+(zstep)
-    
-    
-        zl=ZLPP[IPP.index(max(IPP))]
+        SafeJM(rj,Final) 
         
+        ZLPP=[zl]
+        IPP=[ESP.get("PRInt")]
+
+        print('Push pull translation:Start')
+        while len(find_peaks(IPP,prominence=5,height=height)[0])<=0:  #Push pull
+            if PPI > .80*max(IPP) and IPP.count(ESP.get("PRInt"))<10:
+                coord=(xl,yl,zl)
+                ZLPP.append(zl)
+                #robot.MoveL(target.Pose()*transl(coord))
+                rj=robot.Joints()
+                Final = target.Pose()*transl(coord)
+                SafeLM(rj,Final)
+                
+                PRPPT=[]
+                for j in range(IAS):
+                    #PRPP=PR.get()
+                    PRPP=ESP.get("PRInt")
+                    PRPPT.append(PRPP)
+                PPI=np.average(PRPPT)
+                IPP.append(PPI)
+                zl=zl+(zstep)
+            else:
+                break
+        print('Push pull translation:Complete')
+        print(1)
+        zl=ZLPP[IPP.index(max(IPP))]
+        print(2)
      
         plt.plot(ZLPP,IPP)
         plt.show()
-    
-
+        print(3)
+    print(4)
     coord=(xl,yl,zl)
     #robot.MoveL(target.Pose()*transl(coord))
     rj=robot.Joints()
     Final = target.Pose()*transl(coord)
     SafeJM(rj,Final)   
-    
+    print(1)
     ESP.patch("ledStatus",False)
-    
+    print(1)
     APP_RDK= RDK.Item(APP,ITEM_TYPE_TARGET)
     TPP_RDK= RDK.Item(TPP,ITEM_TYPE_TARGET)
     APP_RDK.setParent(TPP_RDK)
