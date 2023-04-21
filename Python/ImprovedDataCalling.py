@@ -39,9 +39,12 @@ class Spiral:
         return x, y 
     
 class Linear: 
-    def __init__(self,data,points):
+    def __init__(self,data,points,prominence,width,height):
         self.data=data #data
         self.points=points #number of points to fit
+        self.prominence=prominence
+        self.width=width
+        self.height=height
         
     def get(self,x): 
         peaks= find_peaks(self.data['Intensity'], prominence=[prominence],width=width,height=height)
@@ -72,9 +75,12 @@ class Linear:
         LRR=linregress(XPP,YPP)
 
         return LRR[0]*x+LRR[1]
-    def getC(self,x,xl,yl):
-        peaks= find_peaks(self.data['Intensity'], prominence=[prominence],width=width,height=height) #find peaks
-        IPeaks=Iv.index(max(Iv))
+    
+    
+    def getC(self,x,s_center):
+        xl,yl,zl=s_center
+        peaks= find_peaks(self.data['Intensity'], prominence=[self.prominence],width=self.width,height=self.height) #find peaks
+        #IPeaks=Iv.index(max(Iv))
         XPP=[xl]  #use origin of previous spiral as a point
         YPP=[yl]
         XPP.append(self.data['X'][peaks[0][0]])
@@ -197,6 +203,7 @@ class Robot:
             
     def Spiral_scan(self,spiral,coord,prominence,width,height):
         x,y=spiral
+        s_center=coord
         Iv=[]
         X=[]
         Y=[]
@@ -227,30 +234,11 @@ class Robot:
                 Ic=ESP.get("PRInt")
                 Iv.append(np.array(Ic))
             else:
-                ps=find_peaks(Iv,prominence=[prominence],width=width,height=height)[0][0]
-                #fig1 = plt.figure()
-                #plt.style.use('seaborn-notebook')
-                theta=np.array(np.linspace(0,revs*2*np.pi,points))
-                peaks, _ = find_peaks(Iv)
-    
-                # height=.1,distance=3,threshold=0.01,
-                prominences = peak_prominences(Iv, peaks)[0]
-                contour_heights = np.array(Iv)[peaks] - prominences
-                plt.plot(Iv)
-                plt.plot(peaks, np.array(Iv)[peaks], "x")
-                plt.vlines(x=peaks, ymin=contour_heights, ymax=np.array(Iv)[peaks])
-                plt.show()
-    
-                fig = plt.figure()
-    
-                ax = fig.add_subplot(111, projection='3d')
-                ax.plot3D(X, Y, Iv)
-                ax.plot3D(X[ps], Y[ps], Iv[ps],'x')
                 
-                ax.set_xlabel('X axis')
-                ax.set_ylabel('Y axis')
-                ax.set_zlabel('Z axis')
-                plt.show() 
+                
+                self.Plot2DS(Y,Iv)
+                self.Plot3DS(X,Y,Iv,prominence,width,height)
+                
                 break
         
         
@@ -284,17 +272,50 @@ class Robot:
         print('at max of spiral')
         print('Position is', coord)
         
-        return coord,data
+        return coord,s_center,data
     
-    def Linear_scan(self,data,step,coord):
+    def Plot3DS(self,X,Y,I,prominence,width,height):
+
+        ps=find_peaks(I,prominence=[prominence],width=width,height=height)[0][0]
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot3D(X, Y, I)
+        ax.plot3D(X[ps], Y[ps], I[ps],'x')
+        
+        ax.set_xlabel('X axis')
+        ax.set_ylabel('Y axis')
+        ax.set_zlabel('Z axis')
+        plt.show() 
+        
+    def Plot2DS(self,Y,I):
+        #fig1 = plt.figure()
+        #plt.style.use('seaborn-notebook')
+        #theta=np.array(np.linspace(0,revs*2*np.pi,points))
+        peaks, _ = find_peaks(I)
+
+        # height=.1,distance=3,threshold=0.01,
+        prominences = peak_prominences(I, peaks)[0]
+        contour_heights = np.array(I)[peaks] - prominences
+        plt.plot(I)
+        plt.plot(peaks, np.array(I)[peaks], "x")
+        plt.vlines(x=peaks, ymin=contour_heights, ymax=np.array(I)[peaks])
+        plt.show()
+    
+    
+    
+    
+    def Linear_scan(self,data,step,coord,s_center,prominence,width,height):
         xl,yl,zl=coord
+        print('1',str(coord))
         peaks= find_peaks(data['Intensity'],height=height,prominence=[prominence],width=width) 
         IPeaks=peaks[0][0]
-        CL=Linear(data,2) #current linear line definition
+        CL=Linear(data,2,prominence,width,height) #current linear line definition
         
         xL=data['X'][IPeaks]
-        yL=CL.getC(xL,xl,yl) #start y
         
+        print('precurser',str((xL,xl,yl)))
+        yL=CL.getC(xL,s_center) #start y
+        print(yL)
         
         Xl=[xL]  
         Yl=[yL]
@@ -312,9 +333,9 @@ class Robot:
         #Linear search
         while len(find_peaks(Il,prominence=[prominence],width=width,height=height)[0])<=0: #linear move
             xL=xL+step
-            yL=CL.getC(xL,xl,yl)
+            yL=CL.getC(xL,s_center)
             PRLT=[]
-            for j in range(IAS):
+            for j in range(3):
                 #PRL=PR.get()
                 PRL=ESP.get("PRInt")
                 PRLT.append(PRL)
@@ -327,6 +348,7 @@ class Robot:
             Yl.append(yL)
             Il.append(LI)
             coord=(xL,yL,zl)
+            print('1',str(coord))
             
             self.SafeLM(self.TPP,coord)
     
@@ -342,10 +364,13 @@ class Robot:
         Lmax_I=Il.index(max(Ldata['I']))
         xl=Xl[Lmax_I]
         yl=Yl[Lmax_I]
-    
+        print('2',str(coord))
+        coord=(xl,yl,zl)
         #plot goes here
+        print('3',str(coord))
+        return coord, Ldata
         
-    def Push_scan(self,data,step,coord):
+    def PushPull_scan(self,data,step,coord,samples,prominence,width,height):
         xl,yl,zl=coord
         IPP=[]
         ZLPP=[]
@@ -358,22 +383,22 @@ class Robot:
             self.SafeJM(self.TPP,coord)
             
             PRPPT=[]
-            for j in range(IAS):
+            for j in range(samples):
                 #PRPP=PR.get()
                 PRPP=ESP.get("PRInt")
                 PRPPT.append(PRPP)
             PPI=np.average(PRPPT)
             IPP.append(PPI)
     
-            zl=zl+(zstep)
+            zl=zl+(step)
         print('Push pull test: Complete')
         plt.plot(ZLPP,IPP)
         plt.show()
     
         if IPP.index(max(IPP))>0:
-            zstep=zstep
+            step=step
         else:
-            zstep=-zstep
+            step=-step
     
         coord=(xl,yl,zl)
         #robot.MoveJ(target.Pose()*transl(coord))
@@ -384,7 +409,7 @@ class Robot:
         IPP=[ESP.get("PRInt")]
 
         print('Push pull translation:Start')
-        while len(find_peaks(IPP,prominence=5,height=height)[0])<=0:  #Push pull
+        while len(find_peaks(IPP,prominence=prominence,height=height)[0])<=0:  #Push pull
             if PPI > .80*max(IPP) and IPP.count(ESP.get("PRInt"))<10:
                 coord=(xl,yl,zl)
                 ZLPP.append(zl)
@@ -392,13 +417,13 @@ class Robot:
                 self.SafeLM(self.TPP,coord)
                 
                 PRPPT=[]
-                for j in range(IAS):
+                for j in range(samples):
                     #PRPP=PR.get()
                     PRPP=ESP.get("PRInt")
                     PRPPT.append(PRPP)
                 PPI=np.average(PRPPT)
                 IPP.append(PPI)
-                zl=zl+(zstep)
+                zl=zl+(step)
             else:
                 break
         print('Push pull translation:Complete')
@@ -411,7 +436,9 @@ class Robot:
 
         coord=(xl,yl,zl)
 
-        self.SafeJM(self.TPP,coord)  
+        self.SafeJM(self.TPP,coord)
+        print('Done')
+        return coord
     
     def Connect_and_Home(self):
         print(self.Name)
@@ -428,68 +455,29 @@ class Robot:
         self.Name.setJoints([0,0,0,0,0,0])
         self.Name.WaitFinished()
         
-        
-        
-        
-        
-        
-
     
-
-# Set up the IP address and port number of the robot
-IPs = ['192.168.0.100','192.168.0.101']
-R_NAMES = ['1 Mecademic Meca500 R3','2 Mecademic Meca500 R3']
-RTOOLS = ['1 CrystalToolSample','2 CrystalToolSample']
-
-
-#SSAP
-
-
-
-# Initialize ESP Webserver 
-IP="192.168.0.99"
-ext="values"
-ESP=Webserver(IP,ext)
-
-R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','Home1',ESP)
-R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','Home2',ESP)
-#%%
-R1.Connect_and_Home()
-R2.Connect_and_Home()
-
-#%%
-cur_spiral=Spiral(10,1,200,0,0)
-spiral=cur_spiral.build()
-coord=(0,0,0)
-
-s_prom=10
-s_width=3
-s_height=200
-
-coord,data=R1.S_scan(spiral,coord,s_prom,s_width,s_height)
-
 #%%
 
-ESP.Zero()
-ESP.EJog(150)
-
-
-
-
-#%%
 loops=2
+ESP=Webserver('192.168.0.99','values')
 R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','Home1',ESP)
 R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','Home2',ESP)
-ESP=Webserver('192.168.0.99','values')
 
+ESP.patch('ledStatus',False)
 if ESP.get('zero')==0:#If gantry hasn't been zeroed zero it
     ESP.Zero()
 ESP.EJog(150) #jog gantry to position for alignment
 ESP.get('zCurrent') #wait until the gantry move has stopped and can process a get before continuing
 
 
+
+Name=RDK.Item('1 Mecademic Meca500 R3')
+Name.ConnectSafe('192.168.0.100')
 R1.Connect_and_Home()
 R2.Connect_and_Home()
+
+R1.SafeJM(RDK.Item('TPP1'),(0,0,0))
+
 
 Robots=[R1,R2]
 
@@ -500,10 +488,10 @@ for R in Robots:
     coord=(0,0,0)
 
     s_prom=10
-    s_width=3
-    s_height=200
+    s_width=2
+    s_height=90
     
-    
+    ESP.patch('ledStatus',True)
     for L in (range(1,loops+1)):
         cur_spiral=Spiral(10,1/L,200,0,0)
         spiral=cur_spiral.build()
@@ -511,15 +499,14 @@ for R in Robots:
         Lstep=0.5/L**2
         Pstep=1/L**2
         
-        print('L'+str(L))
-        ESP.patch('ledStatus',True)
+        print('Loop'+str(L)+'On Robot'+R)
         
-        coord,Sdata=R.Spiral_scan(spiral,coord,s_prom,s_width,s_height)
-        coord,Ldata=R.Linear_scan(Sdata, Lstep, coord)
-        coord,Pdata=R.Push_scan(Ldata, Pstep, coord)
         
-        ESP.patch('ledStatus',False)
+        coord,s_center,Sdata=R.Spiral_scan(spiral,coord,s_prom,s_width,s_height)
+        coord,Ldata=R.Linear_scan(Sdata, Lstep, coord,s_center,s_prom,s_width,s_height)
+        coord=R.PushPull_scan(Ldata, Pstep, coord,3,s_prom,s_width,s_height)
         
+    ESP.patch('ledStatus',False)    
     R.Connect_and_Home()
         
         

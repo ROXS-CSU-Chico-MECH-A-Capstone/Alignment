@@ -49,6 +49,7 @@ class Robot:
                 state[t]=1
                 i+=1
                 time.sleep(0.1)
+                #print(state)
                 if state==[1,1,1]:
                     state=[0,0,0]
                 
@@ -110,7 +111,7 @@ rdf['Ez']=Ez
 lock = threading.Lock()
 state=[0,0,0]
 
-R=Re(1,1)
+R=Robot(1,1)
 l=np.linspace(1,10,10)
 # Create two threads
 tg = threading.Thread(target=R.RScan,args=(lock,l,0))
