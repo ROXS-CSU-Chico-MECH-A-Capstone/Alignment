@@ -16,20 +16,22 @@ import array
 import pandas as pd
 import requests
 import re
-from scipy.signal import find_peaks, peak_prominences, savgol_filter
+from scipy.signal import find_peaks, peak_prominences
 from scipy.stats import linregress
 import json
 import time
 
 class Spiral:
-    def __init__(self,x0:float,y0:float,points:float) -> None:
+    def __init__(self,radius:float, spacing:float,points:float,x0:float,y0:float) -> None:
         self.x0=x0 #x offset
         self.y0=y0 #y offset
         self.points=points
+        self.radius=radius
+        self.spacing=spacing
         
-    def build(self, radius:float, spacing:float):
-        revs=radius/spacing            #calc number of revolutions
-        k=spacing/(2*np.pi)                       
+    def build(self):
+        revs= self.radius/ self.spacing            #calc number of revolutions
+        k= self.spacing/(2*np.pi)                       
         theta=np.array(np.linspace(0,revs*2*np.pi,self.points)) #how many points and angle coord
         r=k * theta                       #radius coord
         x=(r*np.cos(theta)+self.x0)       #convert to x cartesian
@@ -126,7 +128,14 @@ class Webserver:
            print("Error: ", response.status_code)
         
         return value
-
+    
+    def Zero(self):
+        self.patch("speed","100")
+        self.patch("zero",1) 
+        
+    def EJog(self,pos):
+        self.patch("speed","100")
+        self.patch("goalposLED",pos)
 
 class Intensity: #intensity function is a gaussian curve 
     def __init__(self,x0:float,y0:float, mu_x, mu_y, sigma_x, sigma_y):
@@ -141,121 +150,65 @@ class Intensity: #intensity function is a gaussian curve
     def get(self,x, y): #gaussian curve definition
         I=np.exp(-0.5 * (((x +self.x0- self.mu_x) / self.sigma_x)**2 + ((y+self.y0 - self.mu_y) / self.sigma_y)**2))
         return I
-
-
-# Robot Initialization
-
-TPP= RDK.Item('TPP',ITEM_TYPE_TARGET)
-LED= RDK.Item('LED',ITEM_TYPE_FRAME)
-LEDT= RDK.Item('LEDT',ITEM_TYPE_TARGET)
-LEDT2=RDK.Item('LEDT2')
-
-RCS= RDK.Item('RCS',ITEM_TYPE_TARGET)
-PR= RDK.Item('Photo Resistor',ITEM_TYPE_TARGET)
-APP= RDK.Item('APP',ITEM_TYPE_TARGET)
-#RCS.setParent(LEDT)
-
-#Webserver Initilization
-IP="192.168.0.99"
-ext="values"
-ESP=Webserver(IP,ext)
-
-#Robot Home
-
-# Set up the IP address and port number of the robot
-IPs = ['192.168.0.100','192.168.0.101']
-PORT = [30002,30003]
-R_NAMES = ['1 Mecademic Meca500 R3','2 Mecademic Meca500 R3']
-RTOOLS = ['1 CrystalToolSample','2 CrystalToolSample']
-
-obj=[]
-
-
-
-for nrobot in range(0,len(R_NAMES)):
-    obj.append("robot"+str(nrobot+1))
-    
-    
-
-robots={ 'OBJ':obj,'Names':R_NAMES,'Tools':RTOOLS,'IP': IPs,'Port': PORT}
-rdf = pd.DataFrame(robots)
-
-RID=[]
-TPP=[]
-APP=[]
-Tool=[]
-for nrobot in range(0,len(R_NAMES)):
-    RID.append(RDK.Item(R_NAMES[nrobot]))
-    Tool.append(RDK.Item(str(nrobot+1)+' CrystalToolSample'))
-    TPP.append(RDK.Item('TPP'+str(nrobot+1)))
-    APP.append(RDK.Item('APP'+str(nrobot+1)))
-
-    
-rdf["RID"]=RID
-rdf["Tool"]=Tool
-rdf["TPP"]=TPP
-rdf["APP"]=APP
-
-Ex=[]
-Ey=[]
-Ez=[]
-for n in range(0,len(R_NAMES)):
-    APP=rdf['APP'][n]
-    ex,ey,ez,ea,eb,ec=Pose_2_KUKA(APP.Pose())
-    Ex.append(ex)
-    Ey.append(ey)
-    Ez.append(ez)
-    
-rdf['Ex']=Ex
-rdf['Ey']=Ey
-rdf['Ez']=Ez
-
-def SafeLM(joints,Final_Pose):
-    if self.Name.MoveL_Test(joints,Final_Pose) == 0:         # linear move to the approach position
-        self.Name.MoveL(Final_Pose)
-    else :
-        print("collision avoided")
-        
-def SafeJM(joints,Final_Pose):
-    if self.Name.MoveJ_Test(joints,Final_Pose) == 0:         # linear move to the approach position
-        self.Name.MoveJ(Final_Pose)
-    else :
-        print("collision avoided")
-        
+  
 class Robot:
-    def __init__(self,rdf,index) -> None:
-        self.rdf=rdf
-        self.index=index
-        self.Name=self.rdf['RID'][self.index]
-        self.IP=self.rdf['IP'][self.index]
-        self.Tool=self.rdf['Tool'][self.index]
-        self.TPP=self.rdf['TPP'][self.index]
-        self.APP=self.rdf['APP'][self.index]
-        self.Ex=self.rdf['Ex'][self.index]
-        self.Ey=self.rdf['Ey'][self.index]
-        self.Ez=self.rdf['Ez'][self.index]
+    def __init__(self,Name,IP,Tool,TPP,APP,Home,ESP):
+        self.Name=RDK.Item(Name)
+        self.IP=IP
+        self.Tool=RDK.Item(Tool)
+        self.TPP=RDK.Item(TPP)
+        self.APP=RDK.Item(APP)
+        self.Home=RDK.Item(Home)
+        # Error=Pose_2_KUKA(self.APP.Pose())
+        # self.Ex=Error[0]
+        # self.Ey=Error[1]
+        # self.Ez=Error[2]
+        self.ESP=ESP
+        self.JPos=self.Name.Joints()
         
-    def SafeLM(self,joints,Final_Pose):
-        if self.Name.MoveL_Test(joints,Final_Pose) == 0:         # linear move to the approach position
+    def SafeLM(self,target,trans_coord):
+        Final_Pose=target.Pose()*transl(trans_coord)
+        
+        if self.Name.MoveL_Test(self.JPos,Final_Pose) == 0:         # linear move to the approach position
+            
             self.Name.MoveL(Final_Pose)
+            self.JPos=self.Name.Joints()
         else :
-            print("collision avoided")
+            print("collision avoided at "+ str(trans_coord))
             
-    def SafeJM(self,joints,Final_Pose):
-        if self.Name.MoveJ_Test(joints,Final_Pose) == 0:         # linear move to the approach position
+    def SafeJM(self,target,trans_coord):
+        Final_Pose=target.Pose()*transl(trans_coord)
+        
+        if self.Name.MoveJ_Test(self.JPos,Final_Pose) == 0:         # linear move to the approach position
+        
             self.Name.MoveJ(Final_Pose)
+            self.JPos=self.Name.Joints()
         else :
             print("collision avoided")
             
-    def spiralscan(self,spiral,xl,yl,zl):
+    def Check_Alignment_Status(data,plateau_size,height,xl,yl,zl):
+        if len(find_peaks(data['Intensity'],plateau_size=plateau_size,height=height)[0])>0: #check to see if we are at the peak
+            PI=find_peaks(data['Intensity'],plateau_size=plateau_size,height=height)[0]
+            xl=data['X'][PI]
+            yl=data['Y'][PI]
+            coord=(xl,yl,zl)
+            self.SafeJM(self.TPP,coord)
+            print('SSAP Complete!')
+            
+    def Spiral_scan(self,spiral,coord,prominence,width,height):
         x,y=spiral
+        Iv=[]
+        X=[]
+        Y=[]
+        Z=[]
+        xl,yl,zl=coord
         for i in range(0,len(x)): #loop to get coord and corresponding intensity
             if len(find_peaks(Iv,prominence=[prominence],width=width,height=height)[0])<=0: #check if we found a peak
                 if i==len(x):
                     print('No peaks found in spiral: Spiral centered')
                     coord=(xl,yl,zl)
                     
-                    SafeJM(self.Name.Joints(),self.TPP.Pose()*transl(coord))
+                    self.SafeJM(self.TPP,coord)
                     
                     raise Exception('Alignment Acheived')
                     break
@@ -264,22 +217,18 @@ class Robot:
                 X.append(x[i])
                 Y.append(y[i])
                 Z.append(0)
-                #Ic=PR.get() #get intensity for PR for online run
-
-    
-                #self.Name.MoveL(self.TPP.Pose()*transl(coord))
                 
-
-                SafeLM(self.Name.Joints(),self.TPP.Pose()*transl(coord))
-                print(Final)
+                
+                self.SafeJM(self.TPP,coord)
+                
+                
                 self.Name.WaitFinished()
                 
                 Ic=ESP.get("PRInt")
-                #Ic=TestInt.get(x[i],y[i]) #test intensity get
                 Iv.append(np.array(Ic))
             else:
                 ps=find_peaks(Iv,prominence=[prominence],width=width,height=height)[0][0]
-                fig1 = plt.figure()
+                #fig1 = plt.figure()
                 #plt.style.use('seaborn-notebook')
                 theta=np.array(np.linspace(0,revs*2*np.pi,points))
                 peaks, _ = find_peaks(Iv)
@@ -311,17 +260,7 @@ class Robot:
         data = pd.DataFrame(titled_columns)
         print('Spiral ' +str(L)+ ' Completed')
     
-        if len(find_peaks(data['Intensity'],plateau_size=plateau_size,height=200)[0])>0: #check to see if we are at the peak
-            PI=find_peaks(data['Intensity'],plateau_size=plateau_size,height=height)[0]
-            xl=data['X'][PI]
-            yl=data['Y'][PI]
-            coord=(xl,yl,zl)
-            print(coord)
-            #self.Name.MoveJ(self.TPP.Pose()*transl(coord))
-            
-            SafeJM(self.Name.Joints(),self.TPP.Pose()*transl(coord))
-            
-            print('SSAP Complete!')
+
     
        
     
@@ -340,14 +279,15 @@ class Robot:
         # Il=[PRS]
         
         coord=(xL,yL,zl)
-        SafeLM(self.Name.Joints(),self.TPP.Pose()*transl(coord))
+        self.SafeLM(self.TPP,coord)
         
         print('at max of spiral')
         print('Position is', coord)
         
-        return data,coord
+        return coord,data
     
-    def linearscan(self,data,step,xl,yl,zl):
+    def Linear_scan(self,data,step,coord):
+        xl,yl,zl=coord
         peaks= find_peaks(data['Intensity'],height=height,prominence=[prominence],width=width) 
         IPeaks=peaks[0][0]
         CL=Linear(data,2) #current linear line definition
@@ -388,7 +328,7 @@ class Robot:
             Il.append(LI)
             coord=(xL,yL,zl)
             
-            SafeLM(self.Name.Joints(),self.TPP.Pose()*transl(coord))
+            self.SafeLM(self.TPP,coord)
     
             if len(find_peaks(-np.array(Il),plateau_size=4,prominence=30)[0])<=0:
                 print('Linear moved past alignment')
@@ -405,7 +345,8 @@ class Robot:
     
         #plot goes here
         
-    def PPscan(self,data,step,xl,yl,zl):
+    def Push_scan(self,data,step,coord):
+        xl,yl,zl=coord
         IPP=[]
         ZLPP=[]
         print('Push pull test: Start')
@@ -414,7 +355,7 @@ class Robot:
             ZLPP.append(zl)
             #robot.MoveJ(target.Pose()*transl(coord))
             
-            SafeJM(self.Name.Joints(),self.TPP.Pose()*transl(coord))
+            self.SafeJM(self.TPP,coord)
             
             PRPPT=[]
             for j in range(IAS):
@@ -437,7 +378,7 @@ class Robot:
         coord=(xl,yl,zl)
         #robot.MoveJ(target.Pose()*transl(coord))
         
-        SafeJM(self.Name.Joints(),self.TPP.Pose()*transl(coord)) 
+        self.SafeJM(self.TPP,coord) 
         
         ZLPP=[zl]
         IPP=[ESP.get("PRInt")]
@@ -448,7 +389,7 @@ class Robot:
                 coord=(xl,yl,zl)
                 ZLPP.append(zl)
                 #robot.MoveL(target.Pose()*transl(coord))
-                SafeLM(self.Name.Joints(),self.TPP.Pose()*transl(coord))
+                self.SafeLM(self.TPP,coord)
                 
                 PRPPT=[]
                 for j in range(IAS):
@@ -467,86 +408,118 @@ class Robot:
      
         plt.plot(ZLPP,IPP)
         plt.show()
-        print(3)
-    print(4)
-    coord=(xl,yl,zl)
-    #robot.MoveL(target.Pose()*transl(coord))
-    rj=robot.Joints()
-    Final = target.Pose()*transl(coord)
-    SafeJM(rj,Final)  
+
+        coord=(xl,yl,zl)
+
+        self.SafeJM(self.TPP,coord)  
     
-    def Connect_and_Home_All(rdf):
-        for nrobot in range(0,len(rdf)):
-            print(rdf['Names'][nrobot])
-            
-            robot=self.Name
-            IP=rdf['IP'][nrobot]
-            robot.ConnectSafe(IP)
-            
-            Home='Home'+str(nrobot+1)
-            Home=RDK.Item(Home)
-            
-            #robot.setConnectionParams(IP, Port, 'socket')
-            tool=RDK.Item(rdf['Tools'][nrobot])
-            robot.setPoseTool(tool) # Update the TCP
-            robot.setSpeed(-1,25)  # Set linear speed in mm/s
-            robot.setSpeed(25)  # Set linear speed in mm/s
-            
-            rj=robot.Joints()
-            Final = Home.Pose()
-            SafeJM(rj,Final)
+    def Connect_and_Home(self):
+        print(self.Name)
+        
+        self.Name.ConnectSafe(self.IP)
+        
+        
+        self.Name.setPoseTool(self.Tool) # Update the TCP
+        self.Name.setSpeed(-1,25)  # Set linear speed in mm/s
+        self.Name.setSpeed(25)  # Set linear speed in mm/s
+        #print(self.Name.Joints())
+        #print(self.Home.Pose())
+        self.SafeJM(self.Home,(0,0,0))
+        self.Name.setJoints([0,0,0,0,0,0])
+        self.Name.WaitFinished()
         
         
         
         
         
-def my3dplot(xl,yl,XL,YL,data,Ldata):
-        peaks= find_peaks(data['Intensity'],height=height,prominence=[prominence],width=width) 
-        IPeaks=peaks[0][0]
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        ax.plot3D(data['X'], data['Y'], data['Intensity'])
-        ax.plot3D(data['X'][IPeaks], data['Y'][IPeaks], data['Intensity'][IPeaks],"x")
-        ax.plot3D(xl, yl, max(Ldata['I']),"x")
-        #ax.plot3D(Xl, Yl, Il,'o')
-    
-        ax.set_xlabel('X axis')
-        ax.set_ylabel('Y axis')
-        ax.set_zlabel('Z axis')
-        plt.show()
+        
+
     
 
-
-
-
+# Set up the IP address and port number of the robot
+IPs = ['192.168.0.100','192.168.0.101']
+R_NAMES = ['1 Mecademic Meca500 R3','2 Mecademic Meca500 R3']
+RTOOLS = ['1 CrystalToolSample','2 CrystalToolSample']
 
 
 #SSAP
-#connect and home
-for R in (range(0,len(rdf))):
-    print('R'+str(R+1))
-    
-    robot=Robot(rdf,R)
-    robot.Connect_and_Home(rdf)
+
+
+
+# Initialize ESP Webserver 
+IP="192.168.0.99"
+ext="values"
+ESP=Webserver(IP,ext)
+
+R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','Home1',ESP)
+R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','Home2',ESP)
+#%%
+R1.Connect_and_Home()
+R2.Connect_and_Home()
+
+#%%
+cur_spiral=Spiral(10,1,200,0,0)
+spiral=cur_spiral.build()
+coord=(0,0,0)
+
+s_prom=10
+s_width=3
+s_height=200
+
+coord,data=R1.S_scan(spiral,coord,s_prom,s_width,s_height)
+
+#%%
+
+ESP.Zero()
+ESP.EJog(150)
 
 
 
 
-
-
-
+#%%
 loops=2
-for R in (range(0,len(rdf))):
-    print('R'+str(R+1))
-    
-    robot=Robot(rdf,R)
-    
+R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','Home1',ESP)
+R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','Home2',ESP)
+ESP=Webserver('192.168.0.99','values')
 
+if ESP.get('zero')==0:#If gantry hasn't been zeroed zero it
+    ESP.Zero()
+ESP.EJog(150) #jog gantry to position for alignment
+ESP.get('zCurrent') #wait until the gantry move has stopped and can process a get before continuing
+
+
+R1.Connect_and_Home()
+R2.Connect_and_Home()
+
+Robots=[R1,R2]
+
+
+for R in Robots:
+    print(R)
+
+    coord=(0,0,0)
+
+    s_prom=10
+    s_width=3
+    s_height=200
+    
     
     for L in (range(1,loops+1)):
+        cur_spiral=Spiral(10,1/L,200,0,0)
+        spiral=cur_spiral.build()
+        
+        Lstep=0.5/L**2
+        Pstep=1/L**2
+        
         print('L'+str(L))
-        robot.spiralscan(spiral, xl, yl, zl)
-        robot.linearscan(data, step, xl, yl, zl)
-        robot.ppscan()
+        ESP.patch('ledStatus',True)
+        
+        coord,Sdata=R.Spiral_scan(spiral,coord,s_prom,s_width,s_height)
+        coord,Ldata=R.Linear_scan(Sdata, Lstep, coord)
+        coord,Pdata=R.Push_scan(Ldata, Pstep, coord)
+        
+        ESP.patch('ledStatus',False)
+        
+    R.Connect_and_Home()
         
         
