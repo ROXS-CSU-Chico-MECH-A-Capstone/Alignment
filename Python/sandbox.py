@@ -107,5 +107,64 @@ r.P(3)
 print(rdf)
 test=Test(tdf,0)
 
+#%%
+
+import numpy as np
+from scipy.ndimage import uniform_filter1d
+import matplotlib.pyplot as plt 
+
+import pandas as pd
+
+from scipy.signal import find_peaks, peak_prominences
+
+
+I=[0,1,2,3,4,2,1,0,0,0,0.1,0.1,0,0.10,0,-0.1,0,0,0]
+I=[0,5,12,35,39,45,39,20,15,8,0,1,1,0,0,1,0,1,0,1,1,0,0,0]
+
+#I=np.array(I)+50
+
+Idx=np.diff(I)
+Idxx=np.diff(np.diff(I))
+
+
+def OvershootCheck(data,window,threshold):
+#overshoot check evaluates if the system moved past alighnment by counting instances of 0 slope dI/dx
+   AIdx=uniform_filter1d(np.diff(data),window) 
+   AIdx=AIdx.tolist()
+   if AIdx.count(0)<threshold:
+       state=0
+   else:
+       state=1    
+       return state
+
+
+
+peaks, _ = find_peaks(I,plateau_size=3)
+
+
+    
+    
+    
+
+# height=.1,distance=3,threshold=0.01,
+prominences = peak_prominences(I, peaks)[0]
+contour_heights = np.array(I)[peaks] - prominences
+plt.plot(I)
+plt.plot(peaks, np.array(I)[peaks], "x")
+plt.vlines(x=peaks, ymin=contour_heights, ymax=np.array(I)[peaks])
+
+I=Idx
+plt.plot(I)
+plt.plot(peaks, np.array(I)[peaks], "x")
+plt.vlines(x=peaks, ymin=contour_heights, ymax=np.array(I)[peaks])
+
+
+
+I=Idxx
+plt.plot(I)
+plt.plot(peaks, np.array(I)[peaks], "x")
+plt.vlines(x=peaks, ymin=contour_heights, ymax=np.array(I)[peaks])
+plt.show()
+
 
 

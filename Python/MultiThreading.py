@@ -48,8 +48,8 @@ class Robot:
                 print('thread'+str(t),i)
                 state[t]=1
                 i+=1
-                time.sleep(0.1)
-                #print(state)
+                #time.sleep(0.1)
+                print(state)
                 if state==[1,1,1]:
                     state=[0,0,0]
                 

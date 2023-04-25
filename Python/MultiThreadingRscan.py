@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon Apr 17 23:05:45 2023
+Created on Wed Apr 19 12:41:48 2023
 
 @author: westj
 """
-
-
 from robodk.robolink import *       # import the robolink library (bridge with RoboDK)
 from robodk.robomath import * 
 RDK = Robolink()   
@@ -16,148 +14,14 @@ import array
 import pandas as pd
 import requests
 import re
-from scipy.signal import find_peaks, peak_prominences
+from scipy.signal import find_peaks, peak_prominences, savgol_filter
 from scipy.stats import linregress
-from scipy.ndimage import uniform_filter1d
 import json
 import time
-
-class Spiral:
-    def __init__(self,radius:float, spacing:float,points:float,x0:float,y0:float) -> None:
-        self.x0=x0 #x offset
-        self.y0=y0 #y offset
-        self.points=points
-        self.radius=radius
-        self.spacing=spacing
-        
-    def build(self):
-        revs= self.radius/ self.spacing            #calc number of revolutions
-        k= self.spacing/(2*np.pi)                       
-        theta=np.array(np.linspace(0,revs*2*np.pi,self.points)) #how many points and angle coord
-        r=k * theta                       #radius coord
-        x=(r*np.cos(theta)+self.x0)       #convert to x cartesian
-        y=(r*np.sin(theta)+self.y0)       #convert to y cartesian
-        return x, y 
-    
-class Linear: 
-    def __init__(self,data,points,prominence,width,height):
-        self.data=data #data
-        self.points=points #number of points to fit
-        self.prominence=prominence
-        self.width=width
-        self.height=height
-        
-    def get(self,x): 
-        peaks= find_peaks(self.data['Intensity'], prominence=[prominence],width=width,height=height)
-        IPeaks=peaks[0]
-        H=peaks[1]['peak_heights']
-        A=[]
-        for i in range(len(IPeaks)):
-            corr=[IPeaks[i],H[i]]
-            A.append(corr)
-        SA=sorted(A, key=lambda x: x[1], reverse=True) #sort by peak height largest to smallest
-        if len(SA) <= 1:
-             
-            E=np.sqrt((Ix-xl)**2+(Iy-yl)**2)
-            print('***Linear Translation********************************************************')
-            print(Ldata)
-            print('_________SSAP Report:_________')
-            print('Calculated peak is at',xl,yl)
-            print('True peak is at',Ix,Iy)
-            print('Error is:',E)
-            print('Linear step size is:',step)
-            raise Exception("Spiral did not find enough peaks")
-        XPP=[]
-        YPP=[]
-        for i in range(self.points):
-            #ICP.append(SA[i][0])
-            XPP.append(self.data['X'][SA[i][0]])
-            YPP.append(self.data['Y'][SA[i][0]])
-        LRR=linregress(XPP,YPP)
-
-        return LRR[0]*x+LRR[1]
-    
-    
-    def getC(self,x,s_center):
-        xl,yl,zl=s_center
-        peaks= find_peaks(self.data['Intensity'], prominence=[self.prominence],width=self.width,height=self.height) #find peaks
-        #IPeaks=Iv.index(max(Iv))
-        XPP=[xl]  #use origin of previous spiral as a point
-        YPP=[yl]
-        XPP.append(self.data['X'][peaks[0][0]])
-        YPP.append(self.data['Y'][peaks[0][0]])
-        LRR=linregress(XPP,YPP) #run regression
-        return LRR[0]*x+LRR[1]
+import threading
 
 
-    def getSA(self):
-        peaks= find_peaks(self.data['Intensity'],prominence=[prominence],width=width,height=height)
-        IPeaks=peaks[0]
-        H=peaks[1]['peak_heights']
-        A=[]
-        for i in range(len(IPeaks)):
-            corr=[IPeaks[i],H[i]]
-            A.append(corr)
-        SA=sorted(A, key=lambda g: g[1], reverse=True) #sort by peak height largest to smallest
-        return SA,IPeaks
 
-class Webserver:
-#webserver returns json string that looks like {"speed":25,"goalpos":140,"zCurrent":140.09935,"PRInt":4,"ledStatus":false,"zero":1}
-    def __init__(self,IP,extenstion)->None:
-        self.IP=IP #x offset
-        self.ex=extenstion #y offset
-        
-        
-    def patch(self, obj, value):
-        url = "http://" + self.IP + "/" +self.ex #address of server
-        obj=str(obj)
-        
-        payload = {obj: value} #rewrite the obj to value
-        headers = {"Content-Type": "application/json"} #formatting the message as a json string don't change this
-
-        response = requests.patch(url, data=json.dumps(payload), headers=headers) #patch in or change the value
-
-        if response.status_code == 204: #if 204 which is http good patch
-            print(obj + "Updated successfully")
-        else:
-            print(obj + "Error: ", response.status_code)
-        return 
-            
-    def get(self, obj):
-        url = "http://" + self.IP + "/" +self.ex #address of server
-        obj=str(obj)
-        
-        response = requests.get(url)
-        if response.status_code == 200:
-            value=response.json()[obj]
-            print(obj, value)
-        else:
-           print("Error: ", response.status_code)
-        
-        return value
-    
-    def Zero(self):
-        self.patch("speed","100")
-        self.patch("zero",1) 
-        
-    def EJog(self,pos):
-        self.patch("speed","100")
-        self.patch("goalposLED",pos)
-
-class Intensity: #intensity function is a gaussian curve 
-    def __init__(self,x0:float,y0:float, mu_x, mu_y, sigma_x, sigma_y):
-        self.x0=-x0 #x offset
-        self.y0=-y0 #y offset
-        self.mu_x=mu_x
-        self.mu_y=mu_y
-        self.sigma_x=sigma_x #x squish/stretch
-        self.sigma_y=sigma_y #y sqush/stretch
-        
-        
-    def get(self,x, y): #gaussian curve definition
-        I=np.exp(-0.5 * (((x +self.x0- self.mu_x) / self.sigma_x)**2 + ((y+self.y0 - self.mu_y) / self.sigma_y)**2))
-        return I
-  
 class Robot:
     def __init__(self,Name,IP,Tool,TPP,APP,Home,ESP):
         self.Name=RDK.Item(Name)
@@ -166,10 +30,12 @@ class Robot:
         self.TPP=RDK.Item(TPP)
         self.APP=RDK.Item(APP)
         self.Home=RDK.Item(Home)
+        self.LEDT=RDK.Item(LEDT)
         # Error=Pose_2_KUKA(self.APP.Pose())
         # self.Ex=Error[0]
         # self.Ey=Error[1]
         # self.Ez=Error[2]
+        self.Error=Pose_2_KUKA(self.APP.Pose()) #set error offsets
         self.ESP=ESP
         self.JPos=self.Name.Joints()
         
@@ -348,16 +214,10 @@ class Robot:
             print('1',str(coord))
             
             self.SafeLM(self.TPP,coord)
-            
-            
-            
-            if self.OvershootCheck(Il,3,5)==1:
+    
+            if len(find_peaks(-np.array(Il),plateau_size=4,prominence=30)[0])<=0:
                 print('Linear moved past alignment')
                 break
-            
-            # if len(find_peaks(-np.array(Il),plateau_size=4,prominence=30)[0])<=0:
-            #     print('Linear moved past alignment')
-            #     break
                 
         print('Linear move '+str(L)+ ': COMPLETED')
         
@@ -427,10 +287,6 @@ class Robot:
                 PPI=np.average(PRPPT)
                 IPP.append(PPI)
                 zl=zl+(step)
-                
-                if self.OvershootCheck(IPP,3,5)==1:
-                    print('PushPull moved past alignment')
-                    break
             else:
                 break
         print('Push pull translation:Complete')
@@ -447,17 +303,6 @@ class Robot:
         print('Done')
         return coord
     
-    def OvershootCheck(self,data,window,threshold):
-    #overshoot check evaluates if the system moved past alighnment by counting instances of 0 slope dI/dx
-       AIdx=uniform_filter1d(np.diff(data),window) 
-       AIdx=AIdx.tolist()
-       if AIdx.count(0)<threshold:
-           state=0
-       else:
-           state=1    
-           return state
-        
-    
     def Connect_and_Home(self):
         print(self.Name)
         
@@ -472,8 +317,70 @@ class Robot:
         self.SafeJM(self.Home,(0,0,0))
         self.Name.setJoints([0,0,0,0,0,0])
         self.Name.WaitFinished()
-        
+
+
+    def RScan(self,lock,Rlist,t):
+        global state
+        i=0  
+        while i< len(Rlist):
+            time.sleep(0.1)
+            if state[t]==0:
+                self.safeMJ(self.LEDT,Rlist[i])
+                print('thread'+str(t),i)
+                state[t]=1
+                i+=1
+                #time.sleep(0.1)
+                print(state)
+                if state==[1,1,1]:
+                    state=[0,0,0]
+                
+            elif state[t]==1:
+                time.sleep(0.1)
+#%%
+IPs = ['192.168.0.100','192.168.0.101']
+PORT = [30002,30003]
+R_NAMES = ['1 Mecademic Meca500 R3','2 Mecademic Meca500 R3']
+RTOOLS = ['1 CrystalToolSample','2 CrystalToolSample']
+
+obj=[]
+
+for nrobot in range(0,len(R_NAMES)):
+    obj.append("robot"+str(nrobot+1))
     
+robots={ 'OBJ':obj,'Names':R_NAMES,'Tools':RTOOLS,'IP': IPs,'Port': PORT}
+rdf = pd.DataFrame(robots)
+
+RID=[]
+TPP=[]
+APP=[]
+Tool=[]
+for nrobot in range(0,len(R_NAMES)):
+    RID.append(RDK.Item(R_NAMES[nrobot]))
+    Tool.append(RDK.Item(str(nrobot+1)+' CrystalToolSample'))
+    TPP.append(RDK.Item('TPP'+str(nrobot+1)))
+    APP.append(RDK.Item('APP'+str(nrobot+1)))
+
+    
+rdf["RID"]=RID
+rdf["Tool"]=Tool
+rdf["TPP"]=TPP
+rdf["APP"]=APP
+
+Ex=[]
+Ey=[]
+Ez=[]
+
+for n in range(0,len(R_NAMES)):
+    APP=rdf['APP'][n]
+    ex,ey,ez,ea,eb,ec=Pose_2_KUKA(APP.Pose())
+    Ex.append(ex)
+    Ey.append(ey)
+    Ez.append(ez)
+    
+rdf['Ex']=Ex
+rdf['Ey']=Ey
+rdf['Ez']=Ez
+
 #%%
 
 loops=2
@@ -501,30 +408,35 @@ Robots=[R1,R2]
 
 
 for R in Robots:
-    print(R)
 
-    coord=(0,0,0)
 
-    s_prom=10
-    s_width=2
-    s_height=90
+
+
+
+#%%
+def Rscan(fun1,fun2,fun3,t1,t2,t3)
+    lock = threading.Lock()
+    state=[0,0,0]
     
-    ESP.patch('ledStatus',True)
-    for L in (range(1,loops+1)):
-        cur_spiral=Spiral(10,1/L,200,0,0)
-        spiral=cur_spiral.build()
-        
-        Lstep=0.5/L**2
-        Pstep=1/L**2
-        
-        #print('Loop'+str(L)+'On Robot'+R)
-        
-        
-        coord,s_center,Sdata=R.Spiral_scan(spiral,coord,s_prom,s_width,s_height)
-        coord,Ldata=R.Linear_scan(Sdata, Lstep, coord,s_center,s_prom,s_width,s_height)
-        coord=R.PushPull_scan(Ldata, Pstep, coord,3,s_prom,s_width,s_height)
-        
-    ESP.patch('ledStatus',False)    
-    R.Connect_and_Home()
-        
-        
+    R=Robot(1,1)
+    l=np.linspace(1,10,10)
+    # Create two threads
+    
+    
+    for t in range(0,threads):    
+    tg = threading.Thread(target=fun1,args=(lock,l,t1))
+    t1 = threading.Thread(target=fun2,args=(lock,l,t2))
+    t2 = threading.Thread(target=fun3,args=(lock,l,t3))
+    
+    # Start the threads
+    tg.start()
+    t1.start()
+    t2.start()
+    print('Threads started')
+    
+    # Wait for the threads to finish
+    t1.join()
+    t2.join()
+    tg.join()
+    
+    print("Done!")
