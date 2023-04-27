@@ -414,29 +414,306 @@ for R in Robots:
 
 
 #%%
-def Rscan(fun1,fun2,fun3,t1,t2,t3)
-    lock = threading.Lock()
-    state=[0,0,0]
+    def Rscan(fun1,fun2,fun3,t1,t2,t3):
+        lock = threading.Lock()
+        state=[0,0,0]
+        
+        R=Robot(1,1)
+        l=np.linspace(1,10,10)
+        # Create two threads
+        
+        
+        for t in range(0,threads):    
+        tg = threading.Thread(target=fun1,args=(lock,l,t1))
+        t1 = threading.Thread(target=fun2,args=(lock,l,t2))
+        t2 = threading.Thread(target=fun3,args=(lock,l,t3))
+        
+        # Start the threads
+        tg.start()
+        t1.start()
+        t2.start()
+        print('Threads started')
+        
+        # Wait for the threads to finish
+        t1.join()
+        t2.join()
+        tg.join()
+        
+        print("Done!")
     
-    R=Robot(1,1)
-    l=np.linspace(1,10,10)
-    # Create two threads
+#%%
+
+class MyThreads:
+    def __init__(self,threads):
+        self.state=[0]*threads
+        self.threads=[]
     
+    def RScan(self,Rlist,t):
+        i=0  
+        while i< len(Rlist):
+            time.sleep(0.1)
+            if self.state[t]==0:
+                #safeMJ(Rlist[i])
+                print('thread'+str(t),i)
+                print('list reads: '+str(Rlist[i]))
+                self.state[t]=1
+                i+=1
+                #print(self.state)
+                if self.state==[1]*len(self.state):
+                    self.state=[0]*len(self.state)
+                
+            elif state[t]==1:
+                print('Race Prevented')
+                          
+                
+    def SyncThreads(self,args):
+        for t in range(0,len(args)):  
+        
+            thread = threading.Thread(target=self.RScan,args=args[t])
+            thread.start()
+            self.threads.append(thread)
+        
+        print('Threads started')
+        
+        for t in self.threads:
+            t.join()
+        
+        print("Done!")
+        
+T=MyThreads(3)
+Rlist=np.linspace(0,10,100)
+
+
+args=[[Rlist,0],[Rlist,1],[Rlist,2]] 
+T.SyncThreads(args)
     
-    for t in range(0,threads):    
-    tg = threading.Thread(target=fun1,args=(lock,l,t1))
-    t1 = threading.Thread(target=fun2,args=(lock,l,t2))
-    t2 = threading.Thread(target=fun3,args=(lock,l,t3))
+
+#%%
+#set scan parameters
+zi=150
+zf=400
+points=50
+PRZ=np.linspace(zi,zf,points)
+
+for i in range(0,len(PRZ)):
+    Z=-1*PRZ[i] #call coord for particular scan
+    PR.setPose(Pose(0,0,Z,0,0,0))
+    theta=np.arccos(Z/(2*1000))
+    R=Z/2*np.tan(theta) #distance from emitter detector axis
+
+    for nrobot in range(0,len(rdf)):
+
+        TPP=RDK.Item('TPP'+str(nrobot+1)) #find TPP for robot
+        APP=RDK.Item('APP'+str(nrobot+1)) #find APP for robot
+        ex,ey,ez,ea,eb,ec=Pose_2_KUKA(APP.Pose()) #set error offsets
+        
+        coord=(-Z/2+ex,0+ey,-R+ez)#rowland circle scan position offset from LEDT
+        LEDT=RDK.Item('LEDT'+str(nrobot+1),ITEM_TYPE_TARGET) #find correct LEDT
+        Final = LEDT.Pose()*transl(coord)           #create pose
+        SafeJM(robot.Joints(),Final)                #call move
+        print('Robot Moved')
+#%%
+from robodk.robolink import *       # import the robolink library (bridge with RoboDK)
+from robodk.robomath import * 
+RDK = Robolink()   
+import math
+import numpy as np
+import matplotlib.pyplot as plt 
+import array
+import pandas as pd
+import requests
+import re
+from scipy.signal import find_peaks, peak_prominences
+from scipy.stats import linregress
+from scipy.ndimage import uniform_filter1d
+import json
+import time
+
+class Robot:
+    def __init__(self,Name,IP,Tool,TPP,APP,LEDT,Home,ESP):
+        self.Name=RDK.Item(Name)
+        self.IP=IP
+        self.Tool=RDK.Item(Tool)
+        self.TPP=RDK.Item(TPP)
+        self.APP=RDK.Item(APP)
+        self.LEDT=RDK.Item(LEDT)
+        self.Home=RDK.Item(Home)
+        Error=Pose_2_KUKA(self.APP.Pose())
+        self.Ex=Error[0]
+        self.Ey=Error[1]
+        self.Ez=Error[2]
+        self.ESP=ESP
+        self.JPos=self.Name.Joints()
+        
+    def SafeLM(self,target,trans_coord):
+        Final_Pose=target.Pose()*transl(trans_coord)
+        
+        if self.Name.MoveL_Test(self.JPos,Final_Pose) == 0:         # linear move to the approach position
+            
+            self.Name.MoveL(Final_Pose)
+            self.JPos=self.Name.Joints()
+        else :
+            print("collision avoided at "+ str(trans_coord))
+            
+    def SafeJM(self,target,trans_coord):
+        Final_Pose=target.Pose()*transl(trans_coord)
+        
+        if self.Name.MoveJ_Test(self.JPos,Final_Pose) == 0:         # linear move to the approach position
+        
+            self.Name.MoveJ(Final_Pose)
+            self.JPos=self.Name.Joints()
+        else :
+            print("collision avoided")
+            
+    def BuildRowScan(self,zi,zf,points):
+        PRZ=np.linspace(zi,zf,points)
+        fl=1000#focal length in mm
+        Rlist=[]
+        for i in range(0,len(PRZ)):
+            Z=-1*PRZ[i] #call coord for particular scan
+            theta=np.arccos(Z/(2*fl))
+            R=Z/2*np.tan(theta) #distance from emitter detector axis
+            coord=(-Z/2+self.Ex,0+self.Ey,-R+self.Ez)#rowland circle scan position offset from LEDT
+            Rlist.append(coord)
+        return Rlist
     
-    # Start the threads
-    tg.start()
-    t1.start()
-    t2.start()
-    print('Threads started')
+    def Connect_and_Home(self):
+        print(self.Name)
+        
+        self.Name.ConnectSafe(self.IP)
+        
+        
+        self.Name.setPoseTool(self.Tool) # Update the TCP
+        self.Name.setSpeed(-1,25)  # Set linear speed in mm/s
+        self.Name.setSpeed(25)  # Set linear speed in mm/s
+        #print(self.Name.Joints())
+        #print(self.Home.Pose())
+        self.SafeJM(self.Home,(0,0,0))
+        self.Name.setJoints([0,0,0,0,0,0])
+        self.Name.WaitFinished()
+        
+class Webserver:
+#webserver returns json string that looks like {"speed":25,"goalpos":140,"zCurrent":140.09935,"PRInt":4,"ledStatus":false,"zero":1}
+    def __init__(self,IP,extenstion)->None:
+        self.IP=IP #x offset
+        self.ex=extenstion #y offset
+        
+        
+    def patch(self, obj, value):
+        url = "http://" + self.IP + "/" +self.ex #address of server
+        obj=str(obj)
+        
+        payload = {obj: value} #rewrite the obj to value
+        headers = {"Content-Type": "application/json"} #formatting the message as a json string don't change this
+
+        response = requests.patch(url, data=json.dumps(payload), headers=headers) #patch in or change the value
+
+        if response.status_code == 204: #if 204 which is http good patch
+            print(obj + "Updated successfully")
+        else:
+            print(obj + "Error: ", response.status_code)
+        return 
+            
+    def get(self, obj):
+        url = "http://" + self.IP + "/" +self.ex #address of server
+        obj=str(obj)
+        
+        response = requests.get(url)
+        if response.status_code == 200:
+            value=response.json()[obj]
+            print(obj, value)
+        else:
+           print("Error: ", response.status_code)
+        
+        return value
     
-    # Wait for the threads to finish
-    t1.join()
-    t2.join()
-    tg.join()
+    def Zero(self):
+        self.patch("speed","100")
+        self.patch("zero",1) 
+        
+    def EJog(self,pos):
+        self.patch("speed","100")
+        self.patch("goalposLED",pos)
+
+class MyThreads:
+    def __init__(self,threads):
+        self.state=[0]*threads
+        self.threads=[]
     
-    print("Done!")
+    def RScan(self,Robot,Rlist,t):
+        i=0  
+        while i< len(Rlist):
+            time.sleep(0.1)
+            if self.state[t]==0:
+                Robot.SafeJM(Robot.LEDT,Rlist[i])
+                print('thread'+str(t),i)
+                print('list reads: '+str(Rlist[i]))
+                self.state[t]=1
+                i+=1
+                #print(self.state)
+                if self.state==[1]*len(self.state):
+                    self.state=[0]*len(self.state)
+                
+            elif self.state[t]==1:
+                print('Race Prevented')
+                
+    def GScan(self,ESP,Rlist,t):
+        i=0  
+        while i< len(Rlist):
+            time.sleep(0.1)
+            if self.state[t]==0:
+                ESP.patch("goalposLED",Rlist[i])
+                ESP.get("zCurrent")
+                
+                print('thread'+str(t),i)
+                print('list reads: '+str(Rlist[i]))
+                self.state[t]=1
+                i+=1
+                print(self.state)
+                if self.state==[1]*len(self.state):
+                    self.state=[0]*len(self.state)
+                
+            elif self.state[t]==1:
+                print('Race Prevented')        
+                          
+                
+    def SyncThreads(self,fun,args):
+        for t in range(0,len(args)):  
+        
+            thread = threading.Thread(target=fun[t],args=args[t])
+            thread.start()
+            self.threads.append(thread)
+        
+        print('Threads started')
+        
+        for t in self.threads:
+            t.join()
+        
+        print("Done!")
+        
+########################
+
+ESP=Webserver('192.168.0.99','values')  
+  
+R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','LEDT1','Home1',ESP)
+R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','LEDT2','Home2',ESP)
+
+
+ESP.patch("ledStatus",False)
+R1.Connect_and_Home()
+R2.Connect_and_Home()
+
+zi=150
+zf=400
+points=50
+Rlist1=R1.BuildRowScan(zi,zf,points)
+Rlist2=R2.BuildRowScan(zi,zf,points)
+Glist=np.linspace(zi,zf,points)
+
+T=MyThreads(3)
+fun=[T.RScan,T.RScan,T.GScan]
+args=[[R1,Rlist1,0],[R2,Rlist2,1],[ESP,Glist,2]] 
+
+ESP.patch("ledStatus",True)
+T.SyncThreads(fun,args)
+
