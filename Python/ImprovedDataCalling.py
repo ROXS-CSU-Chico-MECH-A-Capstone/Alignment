@@ -21,6 +21,7 @@ from scipy.stats import linregress
 from scipy.ndimage import uniform_filter1d
 import json
 import time
+from art import *
 
 class Spiral:
     def __init__(self,radius:float, spacing:float,points:float,x0:float,y0:float) -> None:
@@ -50,6 +51,8 @@ class Linear:
     def get(self,x): 
         peaks= find_peaks(self.data['Intensity'], prominence=[prominence],width=width,height=height)
         IPeaks=peaks[0]
+        
+        
         H=peaks[1]['peak_heights']
         A=[]
         for i in range(len(IPeaks)):
@@ -81,11 +84,16 @@ class Linear:
     def getC(self,d,s_center):
         xl,yl,zl=s_center
         peaks= find_peaks(self.data['Intensity'], prominence=[self.prominence],width=self.width,height=self.height) #find peaks
+        
+        i_peaks,_=find_peaks(self.data['Intensity']) #index of all peak positions
+        IPeaks=i_peaks[np.argmax(self.data['Intensity'][i_peaks])] #find max
+        
+        
         #IPeaks=Iv.index(max(Iv))
         XPP=[xl]  #use origin of previous spiral as a point
         YPP=[yl]
-        XPP.append(self.data['X'][peaks[0][0]])
-        YPP.append(self.data['Y'][peaks[0][0]])
+        XPP.append(self.data['X'][IPeaks])
+        YPP.append(self.data['Y'][IPeaks])
         LRR=linregress(XPP,YPP) #run regression
         if d >= 0:
             T=1
@@ -206,7 +214,7 @@ class Robot:
         
     def SafeLM(self,target,trans_coord):
         Final_Pose=target.Pose()*transl(trans_coord)
-        
+        self.Name.setSpeed(-1,50)
         if self.Name.MoveL_Test(self.JPos,Final_Pose) == 0:         # linear move to the approach position
             
             self.Name.MoveL(Final_Pose)
@@ -216,7 +224,7 @@ class Robot:
             
     def SafeJM(self,target,trans_coord):
         Final_Pose=target.Pose()*transl(trans_coord)
-        
+        self.Name.setSpeed(-1,50)
         if self.Name.MoveJ_Test(self.JPos,Final_Pose) == 0:         # linear move to the approach position
         
             self.Name.MoveJ(Final_Pose)
@@ -234,8 +242,11 @@ class Robot:
             print('SSAP Complete!')
             
     def Spiral_scan(self,spiral,coord,prominence,width,height):
+        tprint("SPIRAL: \n-STARTED-",font='larry3d')
         print('Spiral: Started')
-        self.PlotSpiral(spiral)
+        print(coord)
+        
+        self.PlotSpiral(spiral,'Current Spiral')
         
         x,y=spiral
         s_center=coord
@@ -246,35 +257,30 @@ class Robot:
         xl,yl,zl=coord
         for i in range(0,len(x)): #loop to get coord and corresponding intensity
             if len(find_peaks(Iv,prominence=[prominence],width=width,height=height)[0])<=0: #check if we found a peak
-                if self.OvershootCheck(Iv,3,20)==1 and ESP.get("PRInt")<.80*max(Iv):
+                if self.OvershootCheck(Iv,3,100)==1 and ESP.get("PRInt")<.80*max(Iv):
                     print('Spiral moved past alignment')
                     coord=(xl,yl,zl)
                     
                     self.SafeJM(self.TPP,coord)
                     break   
             
-            
-        
-                
                 coord=(x[i],y[i],zl)
+                print(coord)
                 X.append(x[i])
                 Y.append(y[i])
                 Z.append(0)
                 
-                
                 self.SafeJM(self.TPP,coord)
-                
-                
                 self.Name.WaitFinished()
                 
                 Ic=ESP.get("PRInt")
-                Iv.append(np.array(Ic))
+                #Iv.append(np.array(Ic))
+                Iv.append(Ic)
+                #self.Plot2DS(Y,Iv,'Spiral Scan')
             else:
-                
-                
-                self.Plot2DS(Y,Iv)
+
+                self.Plot2DS(Y,Iv,'Spiral Scan')
                 self.Plot3DS(X,Y,Iv,prominence,width,height)
-                
                 break
         
         
@@ -282,10 +288,12 @@ class Robot:
         titled_columns={'X': X,'Y': Y,'Z': Z,
                             'Intensity': Iv}
         data = pd.DataFrame(titled_columns)
-        print('Spiral ' +str(L)+ ' Completed')
+        
+        #peaks= find_peaks(data['Intensity'],height=height,prominence=[prominence],width=width) 
+        #IPeaks=peaks[0][0]
     
-        peaks= find_peaks(data['Intensity'],height=height,prominence=[prominence],width=width) 
-        IPeaks=peaks[0][0]
+        i_peaks,_=find_peaks(data['Intensity'])
+        IPeaks=i_peaks[np.argmax(data['Intensity'][i_peaks])]  
     
         xL=data['X'][IPeaks]
         yL=data['Y'][IPeaks]
@@ -304,6 +312,8 @@ class Robot:
         print('at max of spiral')
         print('Position is', coord)
         print('Spiral Complete')
+        tprint("SPIRAL: \n-COMPLETED-",font='larry3d')
+        print(coord)
         return coord,s_center,data
     
     def Plot3DS(self,X,Y,I,prominence,width,height):
@@ -319,7 +329,7 @@ class Robot:
         ax.set_zlabel('Z axis')
         plt.show() 
         
-    def Plot2DS(self,Y,I):
+    def Plot2DS(self,Y,I,title):
         #fig1 = plt.figure()
         #plt.style.use('seaborn-notebook')
         #theta=np.array(np.linspace(0,revs*2*np.pi,points))
@@ -328,51 +338,73 @@ class Robot:
         # height=.1,distance=3,threshold=0.01,
         prominences = peak_prominences(I, peaks)[0]
         contour_heights = np.array(I)[peaks] - prominences
+        plt.figure(np.random.rand())
         plt.plot(I)
         plt.plot(peaks, np.array(I)[peaks], "x")
         plt.vlines(x=peaks, ymin=contour_heights, ymax=np.array(I)[peaks])
+        
+        plt.title(title)
+        plt.xlabel('Translation')
+        plt.ylabel('Intensity')
         plt.show()
     
     
     
     
     def Linear_scan(self,data,step,coord,s_center,prominence,width,height):
+        print(coord)
+        
+        
+        
+        tprint("LINEAR: \n-STARTED-",font='larry3d')
+        global Il,PRS
         xl,yl,zl=coord
         sxl,syl,szl=s_center
         
-        peaks= find_peaks(data['Intensity'],height=height,prominence=[prominence],width=width) 
-        IPeaks=peaks[0][0]
+        i_peaks,_=find_peaks(data['Intensity'])
+        IPeaks=i_peaks[np.argmax(data['Intensity'][i_peaks])]
+         
         CL=Linear(data,2,prominence,width,height) #current linear line definition
         
         xL=data['X'][IPeaks]
         yL=data['Y'][IPeaks]
       
-        
         Xl=[xL]  
         Yl=[yL]
         PRS=data['Intensity'][IPeaks]
         Il=[PRS]
         
         d=np.sqrt((xl-sxl)**2+(yl-syl)**2)
+        D=[d]
         if  data['X'][IPeaks] > xl:  #find direction to move
-            step=step
-            d=d
-        else:
             step=-step
             d=-d
+        else:
+            step=step
+            d=d
         
         print('Linear move: STARTED')
         
         #Linear search
-        while len(find_peaks(Il,prominence=[prominence],width=width,height=height)[0])<=0: #linear move
+        while len(find_peaks(Il,prominence=prominence,width=width,height=height)[0]) == 0: #linear move
+            if coord == s_center:
+                print('Spiral on Center')
+                break
+        
+            xL,yL=CL.getC(d,s_center)
+            coord=(xL,yL,zl)
+            print(coord)
+            self.SafeLM(self.TPP,coord)
+            
+            # if input('before step (y/n)') != 'y':
+            #     ESP.patch('ledStatus',False)
+            #     break
             
             d +=step
         
-            xL=xL+step
             xL,yL=CL.getC(d,s_center)
-
-            
             coord=(xL,yL,zl)
+            print(coord)
             
             
             self.SafeLM(self.TPP,coord)
@@ -389,35 +421,45 @@ class Robot:
             Xl.append(xL)
             Yl.append(yL)
             Il.append(LI)
-            
+            D.append(d)
             
             if self.OvershootCheck(Il,3,4)==1:
                 print('Linear moved past alignment')
-            else:
-                print('nah')
                 break
+            else:
+                print('Linear not past alignment')
+                
             
+            # if input('step taken (y/n)') != 'y':
+            #     ESP.patch('ledStatus',False)
+            #     break
+            
+            print('length'+str(len(find_peaks(Il,prominence=[prominence],width=width,height=height)[0])))
             # if len(find_peaks(-np.array(Il),plateau_size=4,prominence=30)[0])<=0:
             #     print('Linear moved past alignment')
             #     break
                 
         #print('Linear move '+str(L)+ ': COMPLETED')
         
-        LLdata={'X':Xl,'Y':Yl,'I':Il}
+        LLdata={'X':Xl,'Y':Yl,'D':D,'I':Il}
         Ldata=pd.DataFrame(LLdata)
+        
+        self.Plot2DS(Ldata['D'],Ldata['I'],'Linear Scan')
         
         Lmax_I=Il.index(max(Ldata['I']))
         xl=Xl[Lmax_I]
         yl=Yl[Lmax_I]
-        print('2',str(coord))
+        
         coord=(xl,yl,zl)
         #plot goes here
-        print('3',str(coord))
-        print('YYYYYYYYYYLLLLLLLLLLLLLLL')
-        print(yl)
+        
+        
+        tprint("LINEAR: \n-COMPLETED-",font='larry3d')
+        print(coord)
         return coord, Ldata
  
     def PushPull_scan(self,data,step,coord,samples,prominence,width,height):
+        tprint("PUSH PULL: \n-STARTED-",font='larry3d')
         xl,yl,zl=coord
         IPP=[]
         ZLPP=[]
@@ -439,8 +481,7 @@ class Robot:
     
             zl=zl+(step)
         print('Push pull test: Complete')
-        plt.plot(ZLPP,IPP)
-        plt.show()
+        self.Plot2DS(ZLPP,IPP,'Push Pull Test')
     
         if IPP.index(max(IPP))>0:
             step=step
@@ -453,7 +494,8 @@ class Robot:
         self.SafeJM(self.TPP,coord) 
         
         ZLPP=[zl]
-        IPP=[ESP.get("PRInt")]
+        #IPP=[ESP.get("PRInt")]
+        IPP=[0]
 
         print('Push pull translation:Start')
         while len(find_peaks(IPP,prominence=prominence,height=height)[0])<=0:  #Push pull
@@ -481,34 +523,42 @@ class Robot:
         print(1)
         zl=ZLPP[IPP.index(max(IPP))]
         print(2)
-     
-        plt.plot(ZLPP,IPP)
-        plt.show()
+        
+        self.Plot2DS(ZLPP,IPP,'Push Pull Scan')
+        
+        #plt.plot(ZLPP,IPP)
+        #plt.show()
 
         coord=(xl,yl,zl)
 
         self.SafeJM(self.TPP,coord)
         print('Done')
+        print(coord)
+        tprint("PUSH PULL: \n-COMPLETED-",font='larry3d')
         return coord
     
     def OvershootCheck(self,data,window,threshold):
     #overshoot check evaluates if the system moved past alighnment by counting instances of 0 slope dI/dx
        AIdx=uniform_filter1d(np.diff(data),window) 
        AIdx=AIdx.tolist()
-       #print('averaged intensity slope',str(AIdx))
-       plt.plot(AIdx)
-       plt.show()
-       print('detected this many zeros:',str(AIdx.count(0)))
+       AIdx=np.round(AIdx).tolist()
+       # print('averaged intensity slope',str(AIdx))
+       # plt.plot(AIdx)
+       # plt.show()
+       print('Intensity slope zeros:',str(AIdx.count(0)))
        if AIdx.count(0)<threshold:
            state=0
        else:
            state=1    
            return state
         
-    def PlotSpiral(self,spiral):
+    def PlotSpiral(self,spiral,title):
         x,y=spiral
         plt.plot(x,y)
         plt.axis('equal')
+        plt.title(title)
+        plt.xlabel('X Translation mm')
+        plt.ylabel('Y Translation mm')
         plt.show()
         
     def Connect_and_Home(self):
@@ -528,20 +578,22 @@ class Robot:
         
     def SSAP_ALL(self,Robots,PR_pos,loops,tests):
         self.SetTargets(PR_pos)
+        global Sdata, Ldata
+        Time=[]
         for t in (range(1,tests+1)):
             
             ESP=Webserver('192.168.0.99','values')
-            R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','Home1',ESP)
-            R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','Home2',ESP)
-            
+
             ESP.patch('ledStatus',False)
             if ESP.get('zero')==0:#If gantry hasn't been zeroed zero it
                 ESP.Zero()
             ESP.EJog(PR_pos) #jog gantry to position for alignment
             ESP.get('zCurrent') #wait until the gantry move has stopped and can process a get before continuing
             
-            R1.Connect_and_Home()
-            R2.Connect_and_Home()
+            
+            for R in Robots:
+                R.Connect_and_Home()
+
             
             Robots=[R1,R2]
             
@@ -551,12 +603,14 @@ class Robot:
                 coord=(0,0,0)
             
                 s_prom=10
-                s_width=2
+                s_width=1
                 s_height=50
                 
                 ESP.patch('ledStatus',True)
+                tic()
                 for L in (range(1,loops+1)):
-                    cur_spiral=Spiral(10,1/L,200*L,0,0)
+                    
+                    cur_spiral=Spiral(10,1/L,200*L,coord[0],coord[1])
                     spiral=cur_spiral.build()
                     
                     Lstep=0.5/L**2
@@ -564,13 +618,124 @@ class Robot:
                     
                     print('Loop'+str(L))
                     
-                    
+                    print('start'+str(coord))
                     coord,s_center,Sdata=R.Spiral_scan(spiral,coord,s_prom,s_width,s_height)
                     coord,Ldata=R.Linear_scan(Sdata, Lstep, coord,s_center,s_prom,s_width,s_height)
                     coord=R.PushPull_scan(Ldata, Pstep, coord,3,s_prom,s_width,s_height)
-                    
+                    print('end'+str(coord))
+                time=toc()
+                Time.append(time)
+                print('Time'+str(time))
+                if input('Do You Want To Continue? (y/n)') != 'y':
+                    ESP.patch('ledStatus',False)
+                    break
                 ESP.patch('ledStatus',False)    
                 R.Connect_and_Home()
+                
+            if input('Do You Want To Continue? (y/n)') != 'y':
+                break
+            return Time
+    
+    def SSAP(self,PR_pos,loops,tests):
+        self.SetTargets(PR_pos)
+        
+        if ESP.get('zero')==0:#If gantry hasn't been zeroed zero it
+            ESP.Zero()
+        ESP.EJog(PR_pos) #jog gantry to position for alignment
+        ESP.get('zCurrent') #wait until the gantry move has stopped and can process a get before continuing
+        
+        Time=[]
+        coord=(0,0,0)
+        for t in (range(1,tests+1)):
+            ESP.patch('ledStatus',False)
+            if ESP.get('zero')==0:#If gantry hasn't been zeroed zero it
+                ESP.Zero()
+            ESP.EJog(PR_pos) #jog gantry to position for alignment
+            ESP.get('zCurrent') #wait until the gantry move has stopped and can process a get before continuing
+            
+            
+            self.Connect_and_Home()
+
+            s_prom=5
+            s_width=1
+            s_height=50
+            
+            ESP.patch('ledStatus',True)
+            tic()
+            for L in (range(1,loops+1)):
+                
+                cur_spiral=Spiral(10,1/L,200*L,coord[0],coord[1])
+                spiral=cur_spiral.build()
+                
+                Lstep=0.5/L**2
+                Pstep=1/L**2
+                
+                print('Loop'+str(L))
+                
+                print('start'+str(coord))
+                coord,s_center,Sdata=self.Spiral_scan(spiral,coord,s_prom,s_width,s_height)
+                coord,Ldata=self.Linear_scan(Sdata, Lstep, coord,s_center,s_prom,s_width,s_height)
+                coord=self.PushPull_scan(Ldata, Pstep, coord,3,s_prom,s_width,s_height)
+                print('end'+str(coord))
+            time=toc()
+            
+            Time.append(time)
+            print('Time'+str(time))
+            ESP.patch('ledStatus',False)    
+            self.Connect_and_Home()
+            
+
+            return Time,coord
+        
+    def SSAP_ALL_I(self,Robots,PR_pos,loops,tests):
+        global Error
+        Error=[ [] for _ in range(3)]
+        
+        zi=PR_pos[0]
+        zf=PR_pos[1]
+        
+        ZL=np.linspace(zi,zf,tests)
+        
+        Error[0].append(ZL)
+        Time=[]
+
+        ESP.patch('ledStatus',False)   
+        
+        for R in Robots: #home everyone
+        
+            R.Connect_and_Home()
+        i=0
+            
+        for R in Robots:
+            print('Starting robot call')
+            i+=1
+            print('SLAP on'+ str(R))
+            
+        
+            coord=(0,0,0)
+            
+            tic()
+            for Etests in (range(0,tests)):
+                
+                self.SetTargets(ZL[Etests])
+                    
+                time, coord = R.SSAP( ZL[Etests] , loops, 1 )
+                print(coord)
+                #Everything to do after an alignment
+                
+                Error[i].append(coord)
+                print(Error)
+                time=toc()
+                Time.append(time)
+                print('Time'+str(time))
+                #-----------------------------------------
+                # if input('Do You Want To Continue? (y/n)') != 'y':
+                #     ESP.patch('ledStatus',False)
+                #     break
+                
+            print(0)
+    
+        return Time,Error
                 
     def SetTargets(self,PR_pos):
         # Get a reference to the target object
@@ -594,17 +759,17 @@ class Robot:
         
         
         #Define offsets of robot 1
-        x1=-1145+16#-20
-        y1=-6*25.4-9#+18-2.2556
-        z1=-407.6+0.16
+        x1=-1145+16-22.75#-20
+        y1=-6*25.4-9-2.067#+18-2.2556
+        z1=-407.6+0.16+2.5524
         a1=0
         b1=0
         c1=0.0
         
         #Define offsets of robot 2
-        x2=-1145+12.4-6.5-12.975
-        y2=6*25.4+10-.42-3-11.383
-        z2=-409.6+10+3.8-8.006
+        x2=-1145+12.4-6.5-12.975-12.75
+        y2=6*25.4+10-.42-3-11.383+0.644251028441243+1.2456
+        z2=-409.6+10+3.8-8.006+2.896558268590142
         a2=0
         b2=0
         c2=0.0
@@ -628,65 +793,173 @@ class Robot:
         BI.setParent(TPP1)
         BI.setPose(Pose(-zPR/2,0,1000,0,0,0))
         
-                    
+def printSLAP():
+    print(
+    '   _____ _               _____             _      _____ _____ _   _ __  __ ______ _   _ _______ \n'
+    '  / ____| |        /\   |  __ \      /\   | |    |_   _/ ____| \ | |  \/  |  ____| \ | |__   __|\n'
+    ' | (___ | |       /  \  | |__) |    /  \  | |      | || |  __|  \| | \  / | |__  |  \| |  | |   \n'
+    '  \___ \| |      / /\ \ |  ___/    / /\ \ | |      | || | |_ | . ` | |\/| |  __| | . ` |  | |   \n'
+    '  ____) | |____ / ____ \| |       / ____ \| |____ _| || |__| | |\  | |  | | |____| |\  |  | |   \n'
+    ' |_____/|______/_/    \_\_|      /_/    \_\______|_____\_____|_| \_|_|  |_|______|_| \_|  |_|   \n'
+    '                                                                                                \n'
+                                                                                                    
+    )
+
+
+
+
+def printBAR():
+    print(
+                                                                                                                                                                 
+                                                                                                                                                                 
+                                                                                                                                                                 
+                                                                                                                                                                                                                                     
+     ' ______ ______ ______ ______ ______ ______ ______ ______ ______ ______ ______ ______ ______    \n'
+     '|______|______|______|______|______|______|______|______|______|______|______|______|______| \n'
+     '\ \/ /\ \/ /\ \/ /\ \/ /\ \/ /\ \/ /\ \/ /\ \/ /\ \/ /\ \/ /\ \/ /\ \/ /\ \/ /\ \/ /\ \/ /\ \n'
+     ' >  <  >  <  >  <  >  <  >  <  >  <  >  <  >  <  >  <  >  <  >  <  >  <  >  <  >  <  >  <  >  \n'
+     '/_/\_\/_/\_\/_/\_\/_/\_\/_/\_\/_/\_\/_/\_\/_/\_\/_/\_\/_/\_\/_/\_\/_/\_\/_/\_\/_/\_\/_/\_\/_/ \n'
+     '|______|______|______|______|______|______|______|______|______|______|______|______|______| \n'
+     '\n'                                                                                                                                                            
+    )
     
-#%%
-
-loops=3
-ESP=Webserver('192.168.0.99','values')
-R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','Home1',ESP)
-R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','Home2',ESP)
-
-ESP.patch('ledStatus',False)
-if ESP.get('zero')==0:#If gantry hasn't been zeroed zero it
-    ESP.Zero()
-ESP.EJog(150) #jog gantry to position for alignment
-ESP.get('zCurrent') #wait until the gantry move has stopped and can process a get before continuing
-
-R1.Connect_and_Home()
-R2.Connect_and_Home()
-
-Robots=[R1,R2]
-
-for R in Robots:
-    print(R)
-
-    coord=(0,0,0)
-
-    s_prom=10
-    s_width=2
-    s_height=50
     
-    ESP.patch('ledStatus',True)
-    for L in (range(1,loops+1)):
-        cur_spiral=Spiral(10,1/L,200,0,0)
-        spiral=cur_spiral.build()
-        
-        x,y=spiral
-        plt.plot(x,y)
-        plt.axis('equal')
-        plt.show()
-        Lstep=0.5/L**2
-        Pstep=1/L**2
-        
-        print('Loop'+str(L))
-        
-        
-        coord,s_center,Sdata=R.Spiral_scan(spiral,coord,s_prom,s_width,s_height)
-        coord,Ldata=R.Linear_scan(Sdata, Lstep, coord,s_center,s_prom,s_width,s_height)
-        coord=R.PushPull_scan(Ldata, Pstep, coord,3,s_prom,s_width,s_height)
-        
-    ESP.patch('ledStatus',False)    
-    R.Connect_and_Home()
-        
+    
+def printLOGO(): 
+       print(
+    '   _____ __    ___   ______   _  _____ ____________________  _  _____   __  \n'
+    '  / ___// /   /   | / ____/  / |/ / _ /_  __/_  __/  _/ __ \/ |/ / _ | / / \n'
+    '  \__ \/ /   / /| |/ /      /    / __ |/ /   / / _/ // /_/ /    / __ |/ /__ \n'
+    ' ___/ / /___/ ___ / /___   /_/|_/_/_|_/_/___/_/_/___/\____/_/|_/_/ |_/____/__  ___  \n'
+    '/____/_____/_/  |_\____/     / _ |/ ___/ ___/ __/ /  / __/ _ \/ _ /_  __/ __ \/ _ \ \n'
+    '                            / __ / /__/ /__/ _// /__/ _// , _/ __ |/ / / /_/ / , _/ \n'
+    ' ____________       ___    /_/_|_\___/\___/___/____/___/_/|_/_/_|_/_/__\____/_/|_|  \n'
+    '|\____________\    |\__\   / /  / _ | / _ )/ __ \/ _ \/ _ /_  __/ __ \/ _ \ \/ /  \n'
+    '\|____________|    \|__|  / /__/ __ |/ _  / /_/ / , _/ __ |/ / / /_/ / , _/\  /  \n'
+    '                         /____/_/ |_/____/\____/_/|_/_/ |_/_/  \____/_/|_| /_/  \n'
+                            
+    )
+                           
+
+
+    
+
 #%%
 ESP=Webserver('192.168.0.99','values')
 R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','LEDT1','Home1',ESP)
 R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','LEDT2','Home2',ESP)
 
 #R1.SetTargets(300)
+ESP.patch('ledStatus',False)
+R1.Connect_and_Home()
+R2.Connect_and_Home()
+#%%
+Time,EE=R1.SSAP(400,1,1)
+
+#%%
+printLOGO()
+printBAR()
+printSLAP()
+printBAR()
+
+PR_pos=[100,400]
 
 Robots=[R1,R2]
-loops=2
-tests=1
-R1.SSAP_ALL(Robots,300,loops,tests)
+Time,Error=R1.SSAP_ALL_I(Robots, PR_pos, 1, 3)
+
+#%%
+ESP=Webserver('192.168.0.99','values')
+R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','LEDT1','Home1',ESP)
+R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','LEDT2','Home2',ESP)
+
+#R1.SetTargets(300)
+#ESP.patch('ledStatus',False)
+#R1.Connect_and_Home()
+#R2.Connect_and_Home()
+
+E=[[100., 250., 400.],
+  [(-0.43206826952948507, 0.13363120837748896, 4.0),
+   (0.029686906117525898, -1.253417329681019, 3.0),
+   (-0.615752255473664, -2.6427825445537203, 3.0)],
+  [(1.2983878132051547, -3.0491394495704838, 3.0),
+   (0.8371217487513968, -2.151956559525346, 2.0),
+   (0.0, 0.0, 3.0)]]
+ 
+
+i=0
+ESP.patch("goalposLED", E[0][i])
+coord=E[1][i]
+#coord=(0,0,0)
+
+R1.SetTargets(E[0][i])
+
+R1.SafeJM(RDK.Item('TPP1'), coord)
+ESP.patch('ledStatus',True)
+
+
+#%%
+
+
+# printLOGO()
+# printBAR()
+# printSLAP()
+# printBAR()
+
+# Robots=[R1,R2]
+# loops=2
+# tests=1
+# Time=R1.SSAP_ALL(Robots,300,loops,tests)
+
+#%%
+
+
+
+#%%
+
+# loops=3
+# ESP=Webserver('192.168.0.99','values')
+# R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','LEDT1','Home1',ESP)
+# R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','LEDT2','Home2',ESP)
+
+# ESP.patch('ledStatus',False)
+# if ESP.get('zero')==0:#If gantry hasn't been zeroed zero it
+#     ESP.Zero()
+# ESP.EJog(150) #jog gantry to position for alignment
+# ESP.get('zCurrent') #wait until the gantry move has stopped and can process a get before continuing
+
+# R1.Connect_and_Home()
+# R2.Connect_and_Home()
+
+# Robots=[R1,R2]
+
+# for R in Robots:
+#     print(R)
+
+#     coord=(0,0,0)
+
+#     s_prom=10
+#     s_width=2
+#     s_height=50
+    
+#     ESP.patch('ledStatus',True)
+#     for L in (range(1,loops+1)):
+#         cur_spiral=Spiral(10,1/L,200,0,0)
+#         spiral=cur_spiral.build()
+        
+#         x,y=spiral
+#         plt.plot(x,y)
+#         plt.axis('equal')
+#         plt.show()
+#         Lstep=0.5/L**2
+#         Pstep=1/L**2
+        
+#         print('Loop'+str(L))
+        
+        
+#         coord,s_center,Sdata=R.Spiral_scan(spiral,coord,s_prom,s_width,s_height)
+#         coord,Ldata=R.Linear_scan(Sdata, Lstep, coord,s_center,s_prom,s_width,s_height)
+#         coord=R.PushPull_scan(Ldata, Pstep, coord,3,s_prom,s_width,s_height)
+        
+#     ESP.patch('ledStatus',False)    
+#     R.Connect_and_Home()
+        
