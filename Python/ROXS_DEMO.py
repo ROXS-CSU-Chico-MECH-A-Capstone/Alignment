@@ -5,7 +5,6 @@ Created on Mon Apr 17 23:05:45 2023
 @author: westj
 """
 
-
 from robodk.robolink import *       # import the robolink library (bridge with RoboDK)
 from robodk.robomath import * 
 RDK = Robolink()   
@@ -155,7 +154,7 @@ class Webserver:
 
         response = requests.patch(url, data=json.dumps(payload), headers=headers) #patch in or change the value
 
-        if response.status_code == 204: #if 204 which is http good patch
+        if response.status_code == 200: #if 204 which is http good patch
             print(obj + "Updated successfully")
         else:
             print(obj + "Error: ", response.status_code)
@@ -179,6 +178,9 @@ class Webserver:
         self.patch("zero",1) 
         
     def EJog(self,pos):
+        if self.get("zero") ==0:
+            self.patch("zero","1")
+            
         self.patch("speed","100")
         self.patch("goalposLED",pos)
 
@@ -205,7 +207,8 @@ class Robot:
         self.APP=RDK.Item(APP)
         self.LEDT=RDK.Item(LEDT)
         self.Home=RDK.Item(Home)
-        Error=Pose_2_KUKA(self.APP.Pose())
+        Error=np.array(Pose_2_KUKA(self.TPP.Pose()))-np.array(Pose_2_KUKA(self.APP.Pose()))
+        self.Error=Error
         self.Ex=Error[0]
         self.Ey=Error[1]
         self.Ez=Error[2]
@@ -280,7 +283,7 @@ class Robot:
             else:
 
                 self.Plot2DS(Y,Iv,'Spiral Scan')
-                self.Plot3DS(X,Y,Iv,prominence,width,height)
+                self.Plot3DS(X,Y,Iv)
                 break
         
         
@@ -289,19 +292,15 @@ class Robot:
                             'Intensity': Iv}
         data = pd.DataFrame(titled_columns)
         
-        #peaks= find_peaks(data['Intensity'],height=height,prominence=[prominence],width=width) 
-        #IPeaks=peaks[0][0]
-    
+
         i_peaks,_=find_peaks(data['Intensity'])
         IPeaks=i_peaks[np.argmax(data['Intensity'][i_peaks])]  
     
         xL=data['X'][IPeaks]
         yL=data['Y'][IPeaks]
-        #yL=CL.getC(xL,xl,yl) #start y
-        
+  
         print(data['X'][IPeaks],data['Y'][IPeaks])
-        #Xl=[xL]  
-        #Yl=[yL]
+        
     
         # PRS=data['Intensity'][IPeaks]
         # Il=[PRS]
@@ -378,10 +377,10 @@ class Robot:
         d=np.sqrt((xl-sxl)**2+(yl-syl)**2)
         D=[d]
         if  data['X'][IPeaks] > xl:  #find direction to move
-            step=step
+            step=-step
             d=d
         else:
-            step=-step
+            step=step
             d=-d
         
         print('Linear move: STARTED')
@@ -515,7 +514,7 @@ class Robot:
                 IPP.append(PPI)
                 zl=zl+(step)
                 
-                if self.OvershootCheck(IPP,3,5)==1:
+                if self.OvershootCheck(IPP,3,9)==1:
                     print('PushPull moved past alignment')
                     break
             else:
@@ -685,10 +684,11 @@ class Robot:
             print('Time'+str(time))
             ESP.patch('ledStatus',False)    
             self.Connect_and_Home()
-            
+            self.APP.setParent(RDK.Item('LED'))
+            self.APP.setPose(self.TPP.Pose()*transl(coord))
 
-            return Time,coord
-        
+        return Time,coord
+
     def SSAP_ALL_I(self,Robots,PR_pos,loops,tests):
         global Error
         Error=[ [] for _ in range(3)]
@@ -698,7 +698,8 @@ class Robot:
         
         ZL=np.linspace(zi,zf,tests)
         
-        Error[0].append(ZL)
+        #Error[0].append(ZL)
+        Error[0]=ZL
         Time=[]
 
         ESP.patch('ledStatus',False)   
@@ -749,6 +750,8 @@ class Robot:
         RB2 = RDK.Item('2 Mecademic Meca500 R3 Base',ITEM_TYPE_FRAME)
         LED= RDK.Item('LED',ITEM_TYPE_FRAME)
         BI=RDK.Item('Bing',ITEM_TYPE_TARGET)
+        LEDT1= RDK.Item('LEDT1',ITEM_TYPE_TARGET)
+        LEDT2=RDK.Item('LEDT2')
         
         TPP1.setParent(LED)
         TPP2.setParent(LED)
@@ -761,17 +764,17 @@ class Robot:
         
         
         #Define offsets of robot 1
-        x1=-1161.75
-        y1=-163.467
-        z1=-400
+        x1=-1161.75-2.5+5.5#- push pull
+        y1=-163.467+21-.269#-3.1876 #+ left right
+        z1=-400+0.1216-3.477-4#+2.5#-4.86 #+ up down
         a1=0
         b1=0
         c1=0.0
         
         #Define offsets of robot 2
-        x2=-1145+12.4-6.5-12.975-12.75
-        y2=6*25.4+10-.42-3-11.383+0.644251028441243+1.2456
-        z2=-409.6+10+3.8-8.006+2.896558268590142
+        x2=-1167.27-9.14-3 #-
+        y2=153.3628510284412+1.39#-0.7595#+1 #-
+        z2=-399.3094417314099+0.5658-0.9 #+
         a2=0
         b2=0
         c2=0.0
@@ -780,20 +783,217 @@ class Robot:
         YLT1=0*25.4+ y1#crystal distance from base
         YLT2=-0*25.4+ y2 #crystal distance from base
         
-        bt1=np.rad2deg(np.arcsin(YLT1/FD)) #b tool angle offset for robot 1
-        bt2=np.rad2deg(np.arcsin(YLT2/FD)) #b tool angle offset for robot 1
         
-        XLT1=-np.sqrt(FD**2-YLT1**2) #x tool offset for robot 1
-        XLT2=-np.sqrt(FD**2-YLT2**2)  #x tool offset for robot 2
+        R1=np.sqrt(FD**2-(zPR/2)**2)
+        R2=np.sqrt(FD**2-(zPR/2)**2)
         
-        TPP1.setPose(Pose(XLT1,YLT1,zPR/2,90,90-bt1,-90))
-        TPP2.setPose(Pose(XLT2,YLT2,zPR/2,90,90-bt2,-90))
+        print('R1 is '+str(R1))
+        
+        bt1=np.rad2deg(np.arcsin(YLT1/R1)) #b tool angle offset for robot 1
+        print(str(bt1))
+        bt2=np.rad2deg(np.arcsin(YLT2/R2)) #b tool angle offset for robot 2
+        
+        LEDT1.setPose(KUKA_2_Pose([0,0,0,-bt1,90,0]))
+        LEDT2.setPose(KUKA_2_Pose([0,0,0,-bt2,90,0]))
+        
+        XLT1=-np.sqrt(R1**2-YLT1**2) #x tool offset for robot 1
+        XLT2=-np.sqrt(R2**2-YLT2**2)  #x tool offset for robot 2
+        
+        #TPP1.setPose(Pose(XLT1,YLT1,zPR/2,90,90,0))
+        #TPP2.setPose(Pose(XLT2,YLT2,zPR/2,90,90,0))
+        
+        TPP1.setPose(KUKA_2_Pose([XLT1,YLT1,zPR/2,0,90,bt1]))
+        TPP2.setPose(KUKA_2_Pose([XLT2,YLT2,zPR/2,0,90,bt2]))
         
         RB1.setPose(Pose(x1,y1,z1,a1,b1,c1))#set postion of robot 1 base
         RB2.setPose(Pose(x2,y2,z2,a2,b2,c2))#set postion of robot 2 base
         
         BI.setParent(TPP1)
         BI.setPose(Pose(-zPR/2,0,1000,0,0,0))
+        
+    def BuildRowScanADV(self,ERL,zi,zf,points):
+            PRZ=np.linspace(zi,zf,points)
+            fl=1000#focal length in mm
+            Rlist=[]
+            X=[]
+            Y=[]
+            Zl=[]
+            D=[]
+            
+            for i in range(0,len(PRZ)):
+                Z=-1*PRZ[i] #call coord for particular scan
+                #print(Z)
+                
+                for j in range(0,len(ERL)):
+                    #print(j)
+                    if -ERL[0][j] >= Z >= -ERL[0][j+1]:
+                        print('used eq set'+str(j))
+                        
+                        
+                        mx=ERL[1][j][0][0] #1 regressions j index for which position 0 x regression 0 slope
+                        bx=ERL[1][j][0][1] #1 regressions j index for which position 0 x regression 1 b offset
+                        
+                        my=ERL[1][j][1][0] #1 regressions j index for which position 0 y regression 0 slope
+                        by=ERL[1][j][1][1] #1 regressions j index for which position 0 y regression 1 b offset
+    
+                        mz=ERL[1][j][2][0] #1 regressions j index for which position 0 z regression 0 slope
+                        bz=ERL[1][j][2][1] #1 regressions j index for which position 0 z regression 1 b offset
+    
+                        
+                        
+                        Ex=mx*Z+bx
+                        Ey=my*Z+by
+                        Ez=mz*Z+bz
+                        print('Errors'+str((Ex,Ey,Ez)))
+                        break
+                        
+                        
+    
+                theta=np.arccos(Z/(2*fl))
+                R=Z/2*np.tan(theta) #distance from emitter detector axis
+                print('R is' +str(R))
+                coord=(-Z/2+Ex,0+Ey,-R+Ez)#rowland circle scan position offset from LEDT
+                
+                d=np.sqrt(coord[0]**2+coord[2]**2)
+                X.append(coord[0])
+                Y.append(coord[1])
+                Zl.append(coord[2])
+                D.append(d)
+                Rlist.append(coord)
+                
+            self.Plot3DS(X,Y,Zl)
+            print(D)
+            return Rlist       
+        
+    def Plot3DS(self,X,Y,I):
+        ps=I.index(max(I))
+        #ps=find_peaks(I,prominence=[prominence],width=width,height=height)[0][0]
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot3D(X, Y, I)
+        ax.plot3D(X[ps], Y[ps], I[ps],'x')
+        
+        ax.set_xlabel('X axis')
+        ax.set_ylabel('Y axis')
+        ax.set_zlabel('Z axis')
+        plt.show() 
+            
+    def BuildRowScan(self,zi,zf,points):
+        PRZ=np.linspace(zi,zf,points)
+        fl=1000#focal length in mm
+        Rlist=[]
+        X=[]
+        Y=[]
+        Zl=[]
+        D=[]
+        for i in range(0,len(PRZ)):
+            Z=-1*PRZ[i] #call coord for particular scan
+            theta=np.arccos(Z/(2*fl))
+            R=Z/2*np.tan(theta) #distance from emitter detector axis
+            coord=(-Z/2+self.Ex,0+self.Ey,-R+self.Ez)#rowland circle scan position offset from LEDT
+            
+            d=np.sqrt(coord[0]**2+coord[2]**2)
+            X.append(coord[0])
+            Y.append(coord[1])
+            Zl.append(coord[2])
+            D.append(d)
+            Rlist.append(coord)
+            
+        self.Plot3DS(X,Y,Zl)
+        print(D)
+        return Rlist
+        
+    def ErrorReg(self,E,R_index):
+        ERL=[E[0],[]]
+        
+        for i in range (1,len(E[0])):
+            LRL=[]
+            #print('i is'+str(i))
+            #print(E[0])
+            zlow=-E[0][i-1]
+            zhigh=-E[0][i] #gantry position
+            X=[zlow,zhigh]
+            clow=E[R_index][i-1]
+            chigh=E[R_index][i]
+            
+            for j in range(0,3):
+                #print(j)
+                #print(clow,chigh)
+                el=clow[j] #coordinate error
+                eh=chigh[j]
+                Er=[el,eh]
+                #print(X,E)
+                LR=linregress(X,Er)
+                LRL.append(LR)
+            ERL[1].append(LRL)
+        return ERL
+        
+        
+class MyThreads:
+    def __init__(self,threads):
+        self.state=[0]*threads
+        self.threads=[]
+    
+    def RScan(self,Robot,Rlist,t):
+        Robot.Name.link=Robolink()
+        i=0  
+        while i< len(Rlist):
+            time.sleep(0.001)
+            if self.state[t]==0:
+                
+                Robot.SafeJM(Robot.LEDT,Rlist[i])
+                #print('thread'+str(t),i)
+                #print('list reads: '+str(Rlist[i]))
+                self.state[t]=1
+                i+=1
+                #print(self.state)
+                if self.state==[1]*len(self.state):
+                    self.state=[0]*len(self.state)
+                
+            # elif self.state[t]==1:
+            #     print('Race Prevented')
+                
+    def GScan(self,ESP,Rlist,t):
+        i=0  
+        while i< len(Rlist):
+            time.sleep(0.001)
+            if self.state[t]==0:
+                ESP.patch("goalposLED",Rlist[i])
+                ESP.get("zCurrent")
+                time.sleep(2)
+                
+                #print('thread'+str(t),i)
+                #print('list reads: '+str(Rlist[i]))
+                self.state[t]=1
+                i+=1
+                #print(self.state)
+                if self.state==[1]*len(self.state):
+                    self.state=[0]*len(self.state)
+                
+            # elif self.state[t]==1:
+            #     print('Race Prevented')        
+                          
+                
+    def SyncThreads(self,fun,args):
+        for t in range(0,len(args)):  
+        
+            thread = threading.Thread(target=fun[t],args=args[t])
+            thread.daemon = True
+            thread.start()
+            self.threads.append(thread)
+        
+        print('Threads started')
+        
+        for t in self.threads:
+            t.join()
+        
+        print("Done!")
+    
+def off():
+    ESP.patch("ledStatus",False) 
+    
+def on():
+    ESP.patch("ledStatus",True) 
         
 def printSLAP():
     print(
@@ -841,25 +1041,80 @@ def printLOGO():
     '                         /____/_/ |_/____/\____/_/|_/_/ |_/_/  \____/_/|_| /_/  \n'
                             
     )
-                           
+       
+       
+       def DEMO():
+           ESP=Webserver('192.168.0.99','values')
+           R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','LEDT1','Home1',ESP)
+           R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','LEDT2','Home2',ESP)
+           
+           PR_pos=[100,400]
+           Robots=[R1,R2]
+           
+           zi=100
+           zf=400
+           points=10
+           
+           Error=[[100., 250., 400.],
+             [(0,0,0),
+             (0,0,0),
+             (0,0,0)],
+             [(0,0,0),
+             (0,0,0),
+             (0,0,0)]]
+           
+           ERL1=R1.ErrorReg(Error,1)
+           ERL2=R1.ErrorReg(Error,2)
 
+           Rlist1=R1.BuildRowScanADV(ERL1,zi,zf,points)
+           Rlist2=R1.BuildRowScanADV(ERL2,zi,zf,points)
 
-    
+           Glist=np.linspace(zi,zf,points)
+           
+           while True:
+               ESP.patch('ledStatus',False) 
+               R1.Connect_and_Home()
+               R2.Connect_and_Home()
+               
+               Time,Error=R1.SSAP_ALL_I(Robots, PR_pos, 1, 3)
+               
+               #ADVANCED ROWLANDSCAN
+               T=MyThreads(3)
+               fun=[T.RScan,T.RScan,T.GScan]
+               args=[[R1,Rlist1,0],[R2,Rlist2,1],[ESP,Glist,2]] 
+               ESP.patch("ledStatus",True)
 
-#%%
+               T.SyncThreads(fun,args)
+
+               ESP.patch("ledStatus",False)
+               #ADVANCED ROWLAND SCAN END
+               
+               R1.Connect_and_Home()
+               R2.Connect_and_Home()
+
+               
+               
+ESP=Webserver('192.168.0.99','values')
+R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','LEDT1','Home1',ESP)
+R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','LEDT2','Home2',ESP)
+R1.SetTargets(250)
+R2.SafeJM(R2.TPP,(0,0,0))
+
+([71.17166447639465], (0.13208280232711145, 0.18331322583800944, -1.0))
+([66.3188328742981], (0.13208280232711145, 0.18331322583800944, -0.25))    
+ 
+#%% END OF OOP DEFINITIONS
+
+#%% HOME ROBOTS 
 ESP=Webserver('192.168.0.99','values')
 R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','LEDT1','Home1',ESP)
 R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','LEDT2','Home2',ESP)
 
-R1.SetTargets(200)
 ESP.patch('ledStatus',False) 
 R1.Connect_and_Home()
 R2.Connect_and_Home()
 
-#%%
-Time,EE=R1.SSAP(200,1,1)
-
-#%%
+#%% ADVANCED ERROR MAP
 printLOGO()
 printBAR()
 printSLAP()
@@ -867,102 +1122,78 @@ printBAR()
 
 PR_pos=[100,400]
 
-Robots=[R1,R2]
+Robots=[R2]
 Time,Error=R1.SSAP_ALL_I(Robots, PR_pos, 1, 3)
 
-#%%
-ESP=Webserver('192.168.0.99','values')
-R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','LEDT1','Home1',ESP)
-R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','LEDT2','Home2',ESP)
+#%% ADVANCED ROLAND SCAN SETUP
 
-#R1.SetTargets(300)
-#ESP.patch('ledStatus',False)
-#R1.Connect_and_Home()
-#R2.Connect_and_Home()
 
-E=[[100., 250., 400.],
-  [(-0.43206826952948507, 0.13363120837748896, 4.0),
-   (0.029686906117525898, -1.253417329681019, 3.0),
-   (-0.615752255473664, -2.6427825445537203, 3.0)],
-  [(1.2983878132051547, -3.0491394495704838, 3.0),
-   (0.8371217487513968, -2.151956559525346, 2.0),
-   (0.0, 0.0, 3.0)]]
+zi=100
+zf=400
+points=10
+
+# Error=[[100., 250., 400.],
+#   [(0,0,0),
+#   (0,0,0),
+#   (0,0,0)],
+#   [(0,0,0),
+#   (0,0,0),
+#   (0,0,0)]]
+
+# Error=[[100., 250., 400.],
+#   [(-1.1445669662041074, 0.8096904599165389, 4.0),
+#   (-0.9035361576310216, -1.390522552554445, 0.0),
+#   (-0.7664138659251445, -5.677143901933586, -2.0)],
+#   [(0.0, 0.0, -1.0),
+#   (-0.089026093393152, 2.2545243716641843, 4.0),
+#   (-0.9531281690166111, 5.697204108892134, 7.0)]]
+
+# Error=[[100., 250., 400.],
+#   [(1.1445669662041074, -0.8096904599165389, -4.0),
+#   (0.9035361576310216, 1.390522552554445, 0.0),
+#   (0.7664138659251445, 5.677143901933586, 2.0)],
+#   [(0.0, 0.0, 1.0),
+#   (0.089026093393152, -2.2545243716641843, -4.0),
+#   (0.9531281690166111, -5.697204108892134, -7.0)]]
+
+# Error=[[100., 250., 400.],
+#   [(-4.405096022023609, 0.7727542867937154, 3.0),
+#   (-3.9930813401810132, -0.4430736551736901, 0.0),
+#   (-4.101942335068302, -2.021177177688826, 6.0)],
+#   [(0.0, 0.0, 3.0),
+#   (-0.7363791054969077, 0.5209298837097445, 3.0),
+#   (-1.2491438101254115, 3.066929202173705, 3.0)]]
+
+#Error=[[100., 250., 400.], [(0.04776721052199914, 0.015603921199706976, -1.0), (0.017847839349213964, -0.7535575128342799, 1.0), (0.4451957862772855, -3.742457411226143, 7.0)], [(-1.6406955471012556, -1.3236130895301008, 3.0), (-1.8872203977300137, 0.5190080422426406, 3.0), (-1.0605401544236235, 2.6038647778697848, 5.0)]]
+Error=[[100., 250., 400.], [(0.0, 0.0, -2.0), (0.12377291393271671, -2.237785676815523, 0.0), (0.4451957862772855, -3.742457411226143, 7.0)],[(-0.4400318848962054, -1.6509058556927005, 5.0), (-2.365791488266376, -0.9854169641523914, 3.0), (-2.3935954241552047, 0.5776496802425185, 3.0)]]
  
+ERL1=R1.ErrorReg(Error,1)
+ERL2=R1.ErrorReg(Error,2)
 
-i=0
-ESP.patch("goalposLED", E[0][i])
-coord=E[1][i]
-#coord=(0,0,0)
+Rlist1=R1.BuildRowScanADV(ERL1,zi,zf,points)
+Rlist2=R1.BuildRowScanADV(ERL2,zi,zf,points)
 
-R1.SetTargets(E[0][i])
-
-R1.SafeJM(RDK.Item('TPP1'), coord)
-ESP.patch('ledStatus',True)
+Glist=np.linspace(zi,zf,points)
 
 
-#%%
+#%% ADVANCED ROLAND SCAN RUN
 
-
-# printLOGO()
-# printBAR()
-# printSLAP()
-# printBAR()
-
-# Robots=[R1,R2]
-# loops=2
-# tests=1
-# Time=R1.SSAP_ALL(Robots,300,loops,tests)
-
-#%%
-
-
-
-#%%
-
-# loops=3
-# ESP=Webserver('192.168.0.99','values')
-# R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','LEDT1','Home1',ESP)
-# R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','LEDT2','Home2',ESP)
-
-# ESP.patch('ledStatus',False)
-# if ESP.get('zero')==0:#If gantry hasn't been zeroed zero it
-#     ESP.Zero()
-# ESP.EJog(150) #jog gantry to position for alignment
-# ESP.get('zCurrent') #wait until the gantry move has stopped and can process a get before continuing
-
+# ESP.patch("ledStatus",False)
 # R1.Connect_and_Home()
 # R2.Connect_and_Home()
 
-# Robots=[R1,R2]
-
-# for R in Robots:
-#     print(R)
-
-#     coord=(0,0,0)
-
-#     s_prom=10
-#     s_width=2
-#     s_height=50
+if ESP.get('zero')==0:#If gantry hasn't been zeroed zero it
+    ESP.Zero()
     
-#     ESP.patch('ledStatus',True)
-#     for L in (range(1,loops+1)):
-#         cur_spiral=Spiral(10,1/L,200,0,0)
-#         spiral=cur_spiral.build()
-        
-#         x,y=spiral
-#         plt.plot(x,y)
-#         plt.axis('equal')
-#         plt.show()
-#         Lstep=0.5/L**2
-#         Pstep=1/L**2
-        
-#         print('Loop'+str(L))
-        
-        
-#         coord,s_center,Sdata=R.Spiral_scan(spiral,coord,s_prom,s_width,s_height)
-#         coord,Ldata=R.Linear_scan(Sdata, Lstep, coord,s_center,s_prom,s_width,s_height)
-#         coord=R.PushPull_scan(Ldata, Pstep, coord,3,s_prom,s_width,s_height)
-        
-#     ESP.patch('ledStatus',False)    
-#     R.Connect_and_Home()
-        
+T=MyThreads(3)
+fun=[T.RScan,T.RScan,T.GScan]
+args=[[R1,Rlist1,0],[R2,Rlist2,1],[ESP,Glist,2]] 
+ESP.patch("ledStatus",True)
+
+T.SyncThreads(fun,args)
+
+# ESP.patch("ledStatus",False)
+# R1.Connect_and_Home()
+# R2.Connect_and_Home()
+
+       

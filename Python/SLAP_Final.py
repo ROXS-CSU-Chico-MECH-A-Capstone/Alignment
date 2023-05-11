@@ -205,7 +205,8 @@ class Robot:
         self.APP=RDK.Item(APP)
         self.LEDT=RDK.Item(LEDT)
         self.Home=RDK.Item(Home)
-        Error=Pose_2_KUKA(self.APP.Pose())
+        Error=np.array(Pose_2_KUKA(self.TPP.Pose()))-np.array(Pose_2_KUKA(self.APP.Pose()))
+        self.Error=Error
         self.Ex=Error[0]
         self.Ey=Error[1]
         self.Ez=Error[2]
@@ -685,10 +686,11 @@ class Robot:
             print('Time'+str(time))
             ESP.patch('ledStatus',False)    
             self.Connect_and_Home()
-            
+            self.APP.setParent(RDK.Item('LED'))
+            self.APP.setPose(self.TPP.Pose()*transl(coord))
 
-            return Time,coord
-        
+        return Time,coord
+        Pose2Kukua
     def SSAP_ALL_I(self,Robots,PR_pos,loops,tests):
         global Error
         Error=[ [] for _ in range(3)]
@@ -749,6 +751,8 @@ class Robot:
         RB2 = RDK.Item('2 Mecademic Meca500 R3 Base',ITEM_TYPE_FRAME)
         LED= RDK.Item('LED',ITEM_TYPE_FRAME)
         BI=RDK.Item('Bing',ITEM_TYPE_TARGET)
+        LEDT1= RDK.Item('LEDT1',ITEM_TYPE_TARGET)
+        LEDT2=RDK.Item('LEDT2')
         
         TPP1.setParent(LED)
         TPP2.setParent(LED)
@@ -761,17 +765,17 @@ class Robot:
         
         
         #Define offsets of robot 1
-        x1=-1161.75
-        y1=-163.467
-        z1=-400
+        x1=-1161.75#+4.54   #-
+        y1=-163.467#-3.1876 #+
+        z1=-400-5#-4.86 #+
         a1=0
         b1=0
         c1=0.0
         
         #Define offsets of robot 2
-        x2=-1145+12.4-6.5-12.975-12.75
-        y2=6*25.4+10-.42-3-11.383+0.644251028441243+1.2456
-        z2=-409.6+10+3.8-8.006+2.896558268590142
+        x2=-1145+12.4-6.5-12.975-12.75-2.445
+        y2=6*25.4+10-.42-3-11.383+0.644251028441243+1.2456+3.876 #
+        z2=-409.6+10+3.8-8.006+2.896558268590142+1.6 #
         a2=0
         b2=0
         c2=0.0
@@ -780,20 +784,36 @@ class Robot:
         YLT1=0*25.4+ y1#crystal distance from base
         YLT2=-0*25.4+ y2 #crystal distance from base
         
-        bt1=np.rad2deg(np.arcsin(YLT1/FD)) #b tool angle offset for robot 1
-        bt2=np.rad2deg(np.arcsin(YLT2/FD)) #b tool angle offset for robot 1
+        
+        R1=np.sqrt(FD**2-(zPR/2)**2)
+        R2=np.sqrt(FD**2-(zPR/2)**2)
+        
+        print(str(R1))
+        
+        bt1=np.rad2deg(np.arcsin(YLT1/R1)) #b tool angle offset for robot 1
+        print(str(bt1))
+        bt2=np.rad2deg(np.arcsin(YLT2/R2)) #b tool angle offset for robot 2
+        
+        LEDT1.setPose(KUKA_2_Pose([0,0,0,-bt1,90,0]))
+        LEDT2.setPose(KUKA_2_Pose([0,0,0,-bt2,90,0]))
         
         XLT1=-np.sqrt(FD**2-YLT1**2) #x tool offset for robot 1
         XLT2=-np.sqrt(FD**2-YLT2**2)  #x tool offset for robot 2
         
-        TPP1.setPose(Pose(XLT1,YLT1,zPR/2,90,90-bt1,-90))
-        TPP2.setPose(Pose(XLT2,YLT2,zPR/2,90,90-bt2,-90))
+        #TPP1.setPose(Pose(XLT1,YLT1,zPR/2,90,90,0))
+        #TPP2.setPose(Pose(XLT2,YLT2,zPR/2,90,90,0))
+        
+        TPP1.setPose(KUKA_2_Pose([XLT1,YLT1,zPR/2,0,90,bt1]))
+        TPP2.setPose(KUKA_2_Pose([XLT2,YLT2,zPR/2,0,90,bt2]))
         
         RB1.setPose(Pose(x1,y1,z1,a1,b1,c1))#set postion of robot 1 base
         RB2.setPose(Pose(x2,y2,z2,a2,b2,c2))#set postion of robot 2 base
         
         BI.setParent(TPP1)
         BI.setPose(Pose(-zPR/2,0,1000,0,0,0))
+    
+def off():
+    ESP.patch("ledStatus",False) 
         
 def printSLAP():
     print(
@@ -843,9 +863,11 @@ def printLOGO():
     )
                            
 
-
-    
-
+ESP=Webserver('192.168.0.99','values')
+R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','LEDT1','Home1',ESP)    
+R1.SetTargets(300)
+R1.SafeJM(R1.TPP,(0,0,0))
+R2.SafeJM(R2.TPP,(0,0,0))
 #%%
 ESP=Webserver('192.168.0.99','values')
 R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','APP1','LEDT1','Home1',ESP)
@@ -857,7 +879,7 @@ R1.Connect_and_Home()
 R2.Connect_and_Home()
 
 #%%
-Time,EE=R1.SSAP(200,1,1)
+Time,EE=R2.SSAP(200,1,1)
 
 #%%
 printLOGO()

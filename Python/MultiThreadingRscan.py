@@ -477,21 +477,21 @@ R1=Robot('1 Mecademic Meca500 R3','192.168.0.100','1 CrystalToolSample','TPP1','
 R2=Robot('2 Mecademic Meca500 R3','192.168.0.101','2 CrystalToolSample','TPP2','APP2','LEDT2','Home2',ESP)
 
 
-ESP.patch("ledStatus",False)
+#ESP.patch("ledStatus",False)
 R1.Connect_and_Home()
 R2.Connect_and_Home()
 
 zi=100
 zf=300
-points=20
+points=10
 
-Error=[[100., 250., 400.],
-  [(-0.43206826952948507, 0.13363120837748896, 4.0),
-   (0.029686906117525898, -1.253417329681019, 3.0),
-   (-0.615752255473664, -2.6427825445537203, 3.0)],
-  [(1.2983878132051547, -3.0491394495704838, 3.0),
-   (0.8371217487513968, -2.151956559525346, 2.0),
-   (0.0, 0.0, 3.0)]]
+#Error=[[100., 250., 400.],
+  # [(-0.43206826952948507, 0.13363120837748896, 4.0),
+  #  (0.029686906117525898, -1.253417329681019, 3.0),
+  #  (-0.615752255473664, -2.6427825445537203, 3.0)],
+  # [(1.2983878132051547, -3.0491394495704838, 3.0),
+  #  (0.8371217487513968, -2.151956559525346, 2.0),
+  #  (0.0, 0.0, 3.0)]]
 
 ERL1=R1.ErrorReg(Error,1)
 ERL2=R1.ErrorReg(Error,2)
@@ -513,6 +513,6 @@ ESP.patch("ledStatus",True)
 
 T.SyncThreads(fun,args)
 
-ESP.patch("ledStatus",False)
-R1.Connect_and_Home()
-R2.Connect_and_Home()
+#ESP.patch("ledStatus",False)
+#R1.Connect_and_Home()
+#R2.Connect_and_Home()
